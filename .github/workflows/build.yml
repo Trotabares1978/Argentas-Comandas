@@ -25,7 +25,10 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Prepare original Argentas + Comandas\n        run: python3 scripts/prepare_argentas.py\n\n      - name: Build debug APK\n        run: gradle assembleDebug --no-daemon
+      - name: Prepare original Argentas + Comandas
+        run: python3 scripts/prepare_argentas.py
+
+      - name: Build debug APK\n        run: gradle assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
