@@ -1,215 +1,144 @@
 package com.trotabares.argentascomandas
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
+import android.bluetooth.BluetoothServerSocket
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.widget.Button
-import android.widget.TextView
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.IOException
-import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var statusText: TextView
-    private lateinit var devicesText: TextView
-    private lateinit var logText: TextView
-    private lateinit var testButton: Button
-
+    private lateinit var webView: WebView
     private val executor = Executors.newCachedThreadPool()
-    private val bluetoothAdapter: BluetoothAdapter? by lazy { BluetoothAdapter.getDefaultAdapter() }
-    private var selectedDevice: BluetoothDevice? = null
+    private val adapter: BluetoothAdapter? by lazy { BluetoothAdapter.getDefaultAdapter() }
     private var socket: BluetoothSocket? = null
     private var output: OutputStream? = null
-    private var serverSocket: BluetoothServerSocket? = null
-
-    private val serviceName = "Argentas-Comandas"
-    private val serviceUuid = UUID.fromString("7f8d7b9a-4a3d-4c0e-9b0d-2b0d6c7e9a11")
+    private var server: BluetoothServerSocket? = null
+    private val uuid = UUID.fromString("7f8d7b9a-4a3d-4c0e-9b0d-2b0d6c7e9a11")
     private val permissionRequest = 4107
 
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-
-        statusText = findViewById(R.id.statusText)
-        devicesText = findViewById(R.id.devicesText)
-        logText = findViewById(R.id.logText)
-        testButton = findViewById(R.id.testButton)
-
-        findViewById<Button>(R.id.refreshButton).setOnClickListener { refreshPairedDevices() }
-        findViewById<Button>(R.id.hostButton).setOnClickListener { startServer() }
-        findViewById<Button>(R.id.connectButton).setOnClickListener { connectSelected() }
-        testButton.setOnClickListener { sendTestMessage() }
-
-        ensureBluetoothPermissions()
+        webView = WebView(this)
+        webView.settings.javaScriptEnabled = true
+        webView.settings.domStorageEnabled = true
+        webView.settings.allowFileAccess = true
+        webView.webViewClient = WebViewClient()
+        webView.addJavascriptInterface(NativeBluetoothBridge(), "ArgentasNativeBluetooth")
+        setContentView(webView)
+        ensurePermissions()
+        webView.loadUrl("file:///android_asset/index.html")
     }
 
-    private fun ensureBluetoothPermissions() {
+    private fun ensurePermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val needed = arrayOf(
-                Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_CONNECT
-            ).filter {
-                ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-            }
-            if (needed.isNotEmpty()) {
-                ActivityCompat.requestPermissions(this, needed.toTypedArray(), permissionRequest)
-                return
-            }
+            val needed = arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+                .filter { ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+            if (needed.isNotEmpty()) ActivityCompat.requestPermissions(this, needed.toTypedArray(), permissionRequest)
         }
-        refreshPairedDevices()
     }
 
-    private fun hasConnectPermission(): Boolean =
+    private fun canConnect(): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
-    private fun refreshPairedDevices() {
-        if (!hasConnectPermission()) return
-        val adapter = bluetoothAdapter
-        if (adapter == null) {
-            setStatus("Bluetooth no disponible", false)
-            return
-        }
-        if (!adapter.isEnabled) {
-            setStatus("Bluetooth apagado", false)
-            appendLog("Encendé Bluetooth en los ajustes del teléfono.")
-            return
-        }
+    private fun js(script: String) = runOnUiThread { webView.evaluateJavascript(script, null) }
 
-        val paired = adapter.bondedDevices.toList().sortedBy { it.name ?: it.address }
-        if (paired.isEmpty()) {
-            devicesText.text = "Dispositivos vinculados:\n— Ninguno —\n\nVinculá los dos teléfonos desde Ajustes > Bluetooth."
-            selectedDevice = null
-            return
+    private fun state(value: String, message: String = "") {
+        js("window.onBluetoothState&&window.onBluetoothState(" + JSONObject.quote(value) + "," + JSONObject.quote(message) + ");")
+    }
+
+    private fun devices() {
+        if (!canConnect()) return
+        val a = adapter ?: run { state("NO_DISPONIBLE"); return }
+        if (!a.isEnabled) { state("APAGADO"); return }
+        val arr = JSONArray()
+        a.bondedDevices.toList().sortedBy { it.name ?: it.address }.forEach {
+            arr.put(JSONObject().put("name", it.name ?: "Sin nombre").put("address", it.address))
         }
-
-        selectedDevice = paired.first()
-        devicesText.text = "Dispositivos vinculados:\n" +
-            paired.mapIndexed { i, d ->
-                (i + 1).toString() + ". " + (d.name ?: "Sin nombre") + "\n   " + d.address
-            }.joinToString("\n\n") +
-            "\n\nSeleccionado: " + (selectedDevice?.name ?: selectedDevice?.address)
-
-        appendLog("Encontrados " + paired.size + " dispositivos vinculados.")
+        js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'devices',payload:{devices:" + arr.toString() + "}}}));")
     }
 
     private fun startServer() {
-        if (!hasConnectPermission()) {
-            ensureBluetoothPermissions()
-            return
-        }
-        val adapter = bluetoothAdapter ?: return
-        if (!adapter.isEnabled) {
-            appendLog("Bluetooth está apagado.")
-            return
-        }
-
+        if (!canConnect()) { ensurePermissions(); return }
+        val a = adapter ?: return
+        if (!a.isEnabled) { state("APAGADO"); return }
         executor.execute {
             try {
                 closeConnection()
-                serverSocket = adapter.listenUsingRfcommWithServiceRecord(serviceName, serviceUuid)
-                runOnUiThread {
-                    setStatus("ESPERANDO CONEXIÓN…", true)
-                    appendLog("Este teléfono quedó esperando al otro Argentas-Comandas.")
-                }
-
-                val accepted = serverSocket?.accept()
-                serverSocket?.close()
-                serverSocket = null
-
-                if (accepted != null) establishConnection(accepted, "conexión entrante")
+                server = a.listenUsingRfcommWithServiceRecord("Argentas-Comandas", uuid)
+                state("ESPERANDO", "Esperando al otro teléfono…")
+                val accepted = server!!.accept()
+                server?.close()
+                server = null
+                establish(accepted, "entrante")
             } catch (e: IOException) {
-                runOnUiThread {
-                    setStatus("ERROR DE ESPERA", false)
-                    appendLog("Error esperando conexión: " + (e.message ?: "desconocido"))
-                }
+                state("ERROR", e.message ?: "No se pudo esperar")
             }
         }
     }
 
-    private fun connectSelected() {
-        if (!hasConnectPermission()) {
-            ensureBluetoothPermissions()
-            return
-        }
-
-        val device = selectedDevice
-        if (device == null) {
-            appendLog("No hay dispositivo seleccionado.")
-            return
-        }
-
+    private fun connect(address: String) {
+        if (!canConnect()) { ensurePermissions(); return }
+        val a = adapter ?: return
         executor.execute {
             try {
                 closeConnection()
-                bluetoothAdapter?.cancelDiscovery()
-                runOnUiThread {
-                    setStatus("CONECTANDO…", true)
-                    appendLog("Conectando con " + (device.name ?: device.address) + "…")
-                }
-
-                val newSocket = device.createRfcommSocketToServiceRecord(serviceUuid)
-                newSocket.connect()
-                establishConnection(newSocket, "conexión saliente")
+                a.cancelDiscovery()
+                val device = a.getRemoteDevice(address)
+                state("CONECTANDO", device.name ?: address)
+                val s = device.createRfcommSocketToServiceRecord(uuid)
+                s.connect()
+                establish(s, "saliente")
             } catch (e: IOException) {
-                runOnUiThread {
-                    setStatus("NO CONECTADO", false)
-                    appendLog("Falló la conexión: " + (e.message ?: "desconocido"))
-                }
+                state("DESCONECTADO", e.message ?: "Falló la conexión")
             }
         }
     }
 
-    private fun establishConnection(newSocket: BluetoothSocket, origin: String) {
-        socket = newSocket
-        output = newSocket.outputStream
-
-        runOnUiThread {
-            setStatus("CONECTADO", true)
-            testButton.isEnabled = true
-            appendLog("Bluetooth RFCOMM conectado (" + origin + ").")
-        }
-
+    private fun establish(s: BluetoothSocket, origin: String) {
+        socket = s
+        output = s.outputStream
+        state("CONECTADO", origin)
         executor.execute {
             try {
-                val input: InputStream = newSocket.inputStream
-                val buffer = ByteArray(4096)
+                val input = s.inputStream
+                val buffer = ByteArray(8192)
                 while (true) {
-                    val count = input.read(buffer)
-                    if (count == -1) throw IOException("Conexión cerrada por el otro teléfono")
-                    if (count > 0) {
-                        val message = String(buffer, 0, count, Charsets.UTF_8).trim()
-                        runOnUiThread { appendLog("← RECIBIDO: " + message) }
+                    val n = input.read(buffer)
+                    if (n == -1) throw IOException("Conexión cerrada")
+                    if (n > 0) {
+                        val message = String(buffer, 0, n, Charsets.UTF_8)
+                        js("window.onBluetoothMessage&&window.onBluetoothMessage(" + JSONObject.quote(message) + ");")
                     }
                 }
             } catch (e: IOException) {
-                runOnUiThread {
-                    testButton.isEnabled = false
-                    setStatus("DESCONECTADO", false)
-                    appendLog("Conexión finalizada: " + (e.message ?: "sin detalle"))
-                }
+                state("DESCONECTADO", e.message ?: "Conexión finalizada")
             }
         }
     }
 
-    private fun sendTestMessage() {
+    private fun send(message: String) {
         executor.execute {
             try {
-                val message = "HOLA DESDE ARGENTAS-COMANDAS"
                 output?.write((message + "\n").toByteArray(Charsets.UTF_8))
                 output?.flush()
-                runOnUiThread { appendLog("→ ENVIADO: " + message) }
             } catch (e: IOException) {
-                runOnUiThread { appendLog("No se pudo enviar: " + (e.message ?: "desconocido")) }
+                state("DESCONECTADO", e.message ?: "No se pudo enviar")
             }
         }
     }
@@ -217,27 +146,23 @@ class MainActivity : AppCompatActivity() {
     private fun closeConnection() {
         try { output?.close() } catch (_: Exception) {}
         try { socket?.close() } catch (_: Exception) {}
-        try { serverSocket?.close() } catch (_: Exception) {}
+        try { server?.close() } catch (_: Exception) {}
         output = null
         socket = null
-        serverSocket = null
+        server = null
     }
 
-    private fun setStatus(text: String, connectedLike: Boolean) {
-        statusText.text = "Bluetooth: " + text
-        statusText.setTextColor(getColor(
-            if (connectedLike) android.R.color.holo_green_light
-            else android.R.color.holo_red_light
-        ))
-    }
-
-    private fun appendLog(message: String) {
-        logText.append(message + "\n")
+    inner class NativeBluetoothBridge {
+        @JavascriptInterface fun refresh() = devices()
+        @JavascriptInterface fun startServer() = startServer()
+        @JavascriptInterface fun connect(address: String) = connect(address)
+        @JavascriptInterface fun send(message: String) = send(message)
     }
 
     override fun onDestroy() {
         closeConnection()
         executor.shutdownNow()
+        webView.removeJavascriptInterface("ArgentasNativeBluetooth")
         super.onDestroy()
     }
 }
