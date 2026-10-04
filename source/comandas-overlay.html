@@ -88,11 +88,12 @@ function wireNative(){
 function install(){
  var nav=navFind();if(!nav)return false;
  nav.classList.add('argentas-topnav-compact');
- var oldBtn=nav.querySelector('[data-argentas-connection]');if(oldBtn)oldBtn.remove();
  if(!document.getElementById('argentas-connection-section')){var sec=makeSection();var root=nav.parentElement||document.body;root.appendChild(sec)}
- var b=document.createElement('button');b.type='button';b.setAttribute('data-argentas-connection','1');b.textContent='🔗 Conexión';
- b.onclick=function(ev){ev.preventDefault();var s=makeSection();s.classList.add('open');s.scrollIntoView({behavior:'smooth',block:'start'});};
- nav.appendChild(b);
+ if(!nav.querySelector('[data-argentas-connection]')){
+  var b=document.createElement('button');b.type='button';b.setAttribute('data-argentas-connection','1');b.textContent='🔗 Conexión';
+  b.onclick=function(ev){ev.preventDefault();var s=makeSection();s.classList.add('open');s.scrollIntoView({behavior:'smooth',block:'start'});};
+  nav.appendChild(b);
+ }
  return true;
 }
 function boot(){wireNative();var tries=0;function go(){if(install())return;if(++tries<80)setTimeout(go,250)}go();var mo=new MutationObserver(function(){install()});mo.observe(document.body,{childList:true,subtree:true});}
