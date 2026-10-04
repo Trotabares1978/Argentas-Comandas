@@ -153,10 +153,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     inner class NativeBluetoothBridge {
-        @JavascriptInterface fun refresh() = devices()
-        @JavascriptInterface fun startServer() = startServer()
-        @JavascriptInterface fun connect(address: String) = connect(address)
-        @JavascriptInterface fun send(message: String) = send(message)
+        @JavascriptInterface
+        fun refresh() { devices() }
+
+        @JavascriptInterface
+        fun startServer() { this@MainActivity.startServer() }
+
+        @JavascriptInterface
+        fun connect(address: String) { this@MainActivity.connect(address) }
+
+        @JavascriptInterface
+        fun send(message: String) { this@MainActivity.send(message) }
     }
 
     override fun onDestroy() {
