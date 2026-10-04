@@ -40,8 +40,11 @@ document.querySelectorAll('#argentas-comandas-panel .ac-tabs button').forEach(fu
 })();
 </script>
 <style id="argentas-topnav-connection-style">
-.argentas-topnav-compact{display:flex!important;align-items:stretch!important;gap:3px!important;overflow:hidden!important;width:100%!important}
-.argentas-topnav-compact button,.argentas-topnav-compact a,.argentas-topnav-compact [role="button"]{font-size:9px!important;line-height:1.05!important;padding:6px 4px!important;min-width:0!important;white-space:nowrap!important;flex:1 1 0!important;text-align:center!important}
+/* Navegación original: compacta pero legible en celular */
+.argentas-topnav-compact{width:100%!important;display:flex!important;flex-wrap:wrap!important;align-items:stretch!important;justify-content:stretch!important;gap:4px!important;overflow:visible!important}
+.argentas-topnav-compact > button,
+.argentas-topnav-compact > a,
+.argentas-topnav-compact > [role="button"]{font-size:10px!important;line-height:1.15!important;padding:7px 6px!important;min-width:46px!important;white-space:nowrap!important;flex:1 1 0!important;text-align:center!important}
 #argentas-connection-section{display:none;margin:10px 0 90px;background:#0F0F0F;color:#fff;border:1px solid #292929;border-radius:16px;padding:14px;font-family:Inter,system-ui,sans-serif}
 #argentas-connection-section.open{display:block}
 #argentas-connection-section .acs-title{color:#E8B84A;font-weight:1000;font-size:20px;margin-bottom:4px}
@@ -49,11 +52,14 @@ document.querySelectorAll('#argentas-comandas-panel .ac-tabs button').forEach(fu
 #argentas-connection-section .acs-card{background:#181818;border:1px solid #303030;border-radius:13px;padding:12px;margin-top:9px}
 #argentas-connection-section button{border:0;border-radius:9px;padding:9px 11px;font-weight:900;background:#E8B84A;color:#111;margin:4px 4px 4px 0}
 #argentas-connection-section select{max-width:100%;padding:9px;background:#111;color:#fff;border:1px solid #444;border-radius:9px}
+@media(max-width:380px){
+ .argentas-topnav-compact > button,.argentas-topnav-compact > a,.argentas-topnav-compact > [role="button"]{font-size:9.5px!important;padding:7px 4px!important;min-width:44px!important}
+}
 </style>
 <script id="argentas-topnav-connection-script">
 (function(){'use strict';
 if(window.__ARGENTAS_TOPNAV_CONNECTION__)return;window.__ARGENTAS_TOPNAV_CONNECTION__=true;
-function txt(el){return (el&&el.textContent||'').replace(/\\s+/g,' ').trim()}
+function txt(el){return (el&&el.textContent||'').replace(/\s+/g,' ').trim()}
 function navFind(){
  var els=Array.from(document.querySelectorAll('button,a,[role="button"]')).filter(function(x){var t=txt(x);return t.length&&t.length<40});
  var wanted=['hoy','productos','caja','pedidos'];
@@ -82,17 +88,11 @@ function wireNative(){
 function install(){
  var nav=navFind();if(!nav)return false;
  nav.classList.add('argentas-topnav-compact');
- if(!document.getElementById('argentas-connection-section')){var sec=makeSection();
-   var root=nav.parentElement||document.body;root.appendChild(sec);
- }
- if(!nav.querySelector('[data-argentas-connection]')){
-   var ref=Array.from(nav.querySelectorAll('button,a,[role="button"]')).find(function(x){return /caja|productos|pedidos|hoy/i.test(txt(x))});
-   var holder=ref&&ref.parentElement?ref.parentElement:nav;
-   var b=ref?ref.cloneNode(true):document.createElement('button');
-   b.removeAttribute('id');b.removeAttribute('href');b.removeAttribute('onclick');b.setAttribute('data-argentas-connection','1');b.setAttribute('type','button');b.textContent='🔗 Conexión';
-   b.onclick=function(ev){ev.preventDefault();var s=makeSection();s.classList.add('open');s.scrollIntoView({behavior:'smooth',block:'start'});};
-   holder.appendChild(b);
- }
+ var oldBtn=nav.querySelector('[data-argentas-connection]');if(oldBtn)oldBtn.remove();
+ if(!document.getElementById('argentas-connection-section')){var sec=makeSection();var root=nav.parentElement||document.body;root.appendChild(sec)}
+ var b=document.createElement('button');b.type='button';b.setAttribute('data-argentas-connection','1');b.textContent='🔗 Conexión';
+ b.onclick=function(ev){ev.preventDefault();var s=makeSection();s.classList.add('open');s.scrollIntoView({behavior:'smooth',block:'start'});};
+ nav.appendChild(b);
  return true;
 }
 function boot(){wireNative();var tries=0;function go(){if(install())return;if(++tries<80)setTimeout(go,250)}go();var mo=new MutationObserver(function(){install()});mo.observe(document.body,{childList:true,subtree:true});}
