@@ -3,8 +3,8 @@ package com.trotabares.argentascomandas
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothSocket
 import android.bluetooth.BluetoothServerSocket
+import android.bluetooth.BluetoothSocket
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -46,8 +46,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun ensurePermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val needed = arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-                .filter { ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+            val needed = arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT
+            ).filter {
+                ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+            }
             if (needed.isNotEmpty()) ActivityCompat.requestPermissions(this, needed.toTypedArray(), permissionRequest)
         }
     }
@@ -56,34 +60,38 @@ class MainActivity : AppCompatActivity() {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
-    private fun js(script: String) = runOnUiThread { webView.evaluateJavascript(script, null) }
+    private fun js(script: String) {
+        runOnUiThread { webView.evaluateJavascript(script, null) }
+    }
 
     private fun state(value: String, message: String = "") {
-        js("window.onBluetoothState&&window.onBluetoothState(" + JSONObject.quote(value) + "," + JSONObject.quote(message) + ");")
+        js("window.onBluetoothState&&window.onBluetoothState(" +
+            JSONObject.quote(value) + "," + JSONObject.quote(message) + ");")
     }
 
     private fun devices() {
-        if (!canConnect()) return
+        if (!canConnect()) { ensurePermissions(); return }
         val a = adapter ?: run { state("NO_DISPONIBLE"); return }
-        if (!a.isEnabled) { state("APAGADO"); return }
+        if (!a.isEnabled) { state("APAGADO", "Activá Bluetooth"); return }
         val arr = JSONArray()
         a.bondedDevices.toList().sortedBy { it.name ?: it.address }.forEach {
             arr.put(JSONObject().put("name", it.name ?: "Sin nombre").put("address", it.address))
         }
-        js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'devices',payload:{devices:" + arr.toString() + "}}}));")
+        js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'devices',payload:{devices:" +
+            arr.toString() + "}}}));")
     }
 
     private fun startServer() {
         if (!canConnect()) { ensurePermissions(); return }
         val a = adapter ?: return
-        if (!a.isEnabled) { state("APAGADO"); return }
+        if (!a.isEnabled) { state("APAGADO", "Activá Bluetooth"); return }
         executor.execute {
             try {
                 closeConnection()
                 server = a.listenUsingRfcommWithServiceRecord("Argentas-Comandas", uuid)
                 state("ESPERANDO", "Esperando al otro teléfono…")
                 val accepted = server!!.accept()
-                server?.close()
+                try { server?.close() } catch (_: Exception) {}
                 server = null
                 establish(accepted, "entrante")
             } catch (e: IOException) {
@@ -117,13 +125,26 @@ class MainActivity : AppCompatActivity() {
         executor.execute {
             try {
                 val input = s.inputStream
-                val buffer = ByteArray(8192)
+                val buffer = ByteArray(4096)
+                val pending = StringBuilder()
                 while (true) {
                     val n = input.read(buffer)
-                    if (n == -1) throw IOException("Conexión cerrada")
-                    if (n > 0) {
-                        val message = String(buffer, 0, n, Charsets.UTF_8)
-                        js("window.onBluetoothMessage&&window.onBluetoothMessage(" + JSONObject.quote(message) + ");")
+                    if (n < 0) throw IOException("Conexión cerrada")
+                    if (n == 0) continue
+                    pending.append(String(buffer, 0, n, Charsets.UTF_8))
+                    while (true) {
+                        val end = pending.indexOf("\n")
+                        if (end < 0) break
+                        val message = pending.substring(0, end).trimEnd('\r')
+                        pending.delete(0, end + 1)
+                        if (message.isNotEmpty()) {
+                            js("window.onBluetoothMessage&&window.onBluetoothMessage(" +
+                                JSONObject.quote(message) + ");")
+                        }
+                    }
+                    if (pending.length > 1024 * 1024) {
+                        pending.setLength(0)
+                        state("ERROR", "Mensaje Bluetooth demasiado grande")
                     }
                 }
             } catch (e: IOException) {
@@ -135,8 +156,12 @@ class MainActivity : AppCompatActivity() {
     private fun send(message: String) {
         executor.execute {
             try {
-                output?.write((message + "\n").toByteArray(Charsets.UTF_8))
-                output?.flush()
+                val out = output ?: run {
+                    state("DESCONECTADO", "No hay teléfono conectado")
+                    return@execute
+                }
+                out.write((message.replace("\r", "").replace("\n", "") + "\n").toByteArray(Charsets.UTF_8))
+                out.flush()
             } catch (e: IOException) {
                 state("DESCONECTADO", e.message ?: "No se pudo enviar")
             }
@@ -153,17 +178,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     inner class NativeBluetoothBridge {
-        @JavascriptInterface
-        fun refresh() { devices() }
-
-        @JavascriptInterface
-        fun startServer() { this@MainActivity.startServer() }
-
-        @JavascriptInterface
-        fun connect(address: String) { this@MainActivity.connect(address) }
-
-        @JavascriptInterface
-        fun send(message: String) { this@MainActivity.send(message) }
+        @JavascriptInterface fun refresh() { devices() }
+        @JavascriptInterface fun startServer() { this@MainActivity.startServer() }
+        @JavascriptInterface fun connect(address: String) { this@MainActivity.connect(address) }
+        @JavascriptInterface fun send(message: String) { this@MainActivity.send(message) }
     }
 
     override fun onDestroy() {
