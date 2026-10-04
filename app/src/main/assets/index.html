@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Argentas-Comandas</title>
+<style>body{font-family:sans-serif;margin:0;padding:24px;background:#111;color:#fff}button{padding:12px;margin:4px;border-radius:8px}#log{white-space:pre-wrap;background:#222;padding:12px;border-radius:8px}</style></head>
+<body><h1>ARGENTAS-COMANDAS</h1><p id="status">Bluetooth: iniciando…</p>
+<button onclick="ArgentasNativeBluetooth.refresh()">Actualizar dispositivos</button><button onclick="ArgentasNativeBluetooth.startServer()">Esperar conexión</button>
+<select id="devices"></select><button onclick="connectSelected()">Conectar</button>
+<button onclick="sendTest()">Enviar prueba</button><h3>Registro</h3><div id="log"></div>
+<script>
+function log(x){document.getElementById('log').textContent+=x+"\n"}
+window.onBluetoothState=(s,m)=>{document.getElementById('status').textContent="Bluetooth: "+s+(m?" — "+m:"");log("[estado] "+s+" "+m)}
+window.onBluetoothMessage=m=>log("[recibido] "+m)
+window.addEventListener('argentas-bluetooth',e=>{if(e.detail.type!=="devices")return;const d=document.getElementById('devices');d.innerHTML="";e.detail.payload.devices.forEach(x=>{const o=document.createElement('option');o.value=x.address;o.textContent=x.name+" — "+x.address;d.appendChild(o)});log("Dispositivos: "+e.detail.payload.devices.length)})
+function connectSelected(){const v=document.getElementById('devices').value;if(v)ArgentasNativeBluetooth.connect(v)}
+function sendTest(){ArgentasNativeBluetooth.send(JSON.stringify({type:"test",from:"Argentas-Comandas",at:Date.now()}))}
+</script></body></html>
