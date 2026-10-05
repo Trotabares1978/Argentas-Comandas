@@ -74,7 +74,6 @@ class MainActivity : AppCompatActivity() {
             state("ERROR", "No se pudo buscar Argentas por Bluetooth ($errorCode)")
         }
     }
-    private var receiverRegistered = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -374,10 +373,6 @@ class MainActivity : AppCompatActivity() {
         closeConnection()
         stopPresenceScan()
         try { bleAdvertiser?.stopAdvertising(bleAdvertiseCallback) } catch (_: Exception) {}
-        if (receiverRegistered) {
-            try { unregisterReceiver(discoveryReceiver) } catch (_: Exception) {}
-            receiverRegistered = false
-        }
         executor.shutdownNow()
         writerExecutor.shutdownNow()
         webView.removeJavascriptInterface("ArgentasNativeBluetooth")
