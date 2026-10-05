@@ -12,6 +12,35 @@
 <section id="ac-lista" style="display:none"></section><section id="ac-ventas" style="display:none"></section>
 <section id="ac-bt" style="display:none"><div class="ac-card"><b>Bluetooth directo</b><div class="ac-muted" style="margin-top:5px">Celular ↔ celular · sin Wi‑Fi, hotspot, internet ni servidor.</div><div class="ac-actions"><button class="ac-btn ac-dark" id="ac-wait">Esperar conexión</button><button class="ac-btn ac-dark" id="ac-refresh">Actualizar</button></div><div style="display:flex;gap:6px;margin-top:10px"><select id="ac-devices" style="flex:1;padding:9px;background:#111;color:#fff;border:1px solid #444;border-radius:9px"><option value="">Elegí teléfono emparejado</option></select><button class="ac-btn ac-primary" id="ac-connect">Conectar</button></div><div id="ac-btmsg" class="ac-muted" style="margin-top:8px">Emparejá ambos teléfonos desde Android.</div></div></section>
 </div></div>
+
+<style id="argentas-comandas-nav-style">
+/* La navegación principal móvil se desplaza horizontalmente; no achica los botones. */
+@media(max-width:767px){
+  nav.md\\:hidden{overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none;touch-action:pan-x}
+  nav.md\\:hidden::-webkit-scrollbar{display:none}
+}
+</style>
+<script id="argentas-comandas-nav-script">(function(){
+'use strict';
+function addNavItem(){
+  var navs=Array.from(document.querySelectorAll('nav'));
+  var nav=navs.find(function(n){return /HOY/.test(n.textContent||'')&&/CAJA/.test(n.textContent||'')&&/HIST/.test(n.textContent||'')});
+  if(!nav||nav.querySelector('[data-argentas-comandas-nav]'))return;
+  var ref=Array.from(nav.querySelectorAll('button')).find(function(b){return /HIST|CAJA|PRODS/.test((b.textContent||'').trim())});
+  if(!ref)return;
+  var b=ref.cloneNode(true);
+  b.setAttribute('data-argentas-comandas-nav','1');
+  b.textContent='🧾 COMANDAS';
+  b.onclick=function(ev){
+    ev.preventDefault();
+    var launcher=document.getElementById('argentas-comandas-launcher');
+    if(launcher)launcher.click();
+  };
+  ref.parentElement.appendChild(b);
+}
+function boot(){addNavItem();new MutationObserver(addNavItem).observe(document.body,{childList:true,subtree:true})}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+})();</script>
 <script>(function(){'use strict';
 var KEY='argentas_comandas_v2',db=load(),draft=[],connected=false,syncing=false;
 function pushOrderToCaja(o){try{var raw=localStorage.getItem('argentas_sales'),sales=raw?JSON.parse(raw):[];if(!Array.isArray(sales))sales=[];if(sales.some(function(s){return s.comandaId===o.id}))return;var sale={id:'comanda-'+o.id,comandaId:o.id,fecha:new Date(o.createdAt||Date.now()).toISOString(),date:new Date(o.createdAt||Date.now()).toISOString(),items:o.lines.map(function(x){return{id:x.productId,name:x.name,qty:x.qty,price:x.price,total:x.qty*x.price}}),total:Number(o.total)||0,efectivo:0,transferencia:0,tipo:'comanda',paymentMethod:'Comanda',estadoComanda:o.status,origen:'Bluetooth'};sales.push(sale);localStorage.setItem('argentas_sales',JSON.stringify(sales))}catch(e){console.warn('No se pudo pasar la comanda a Caja',e)}}
