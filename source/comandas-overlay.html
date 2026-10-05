@@ -44,18 +44,23 @@
 <style id="argentas-comandas-nav-style">
 /* La navegación principal móvil se desplaza horizontalmente; no achica los botones. */
 @media(max-width:767px){
-  nav.md\\:hidden{overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none;touch-action:pan-x;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
-  nav.md\\:hidden::-webkit-scrollbar{display:none}
+  /* Menú principal móvil: una sola barra horizontal, siempre deslizable con el dedo. */
+  nav:not(.md\\:hidden){display:none!important}
+  nav.md\\:hidden{display:block!important;position:fixed!important;bottom:0!important;left:0!important;right:0!important;width:100%!important;overflow:hidden!important;touch-action:pan-x!important}
+  nav.md\\:hidden>div{display:flex!important;flex-wrap:nowrap!important;width:max-content!important;min-width:max-content!important;max-width:none!important;overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none!important;touch-action:pan-x!important;-webkit-overflow-scrolling:touch!important;overscroll-behavior-x:contain!important}
+  nav.md\\:hidden>div::-webkit-scrollbar{display:none!important}
+  nav.md\\:hidden button{flex:0 0 76px!important;width:76px!important;min-width:76px!important}
 }
 @media(min-width:768px){
-  nav:not(.md\\:hidden)>div{overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none;touch-action:pan-x;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
-  nav:not(.md\\:hidden)>div::-webkit-scrollbar{display:none}
+  nav:not(.md\\:hidden)>div{display:flex!important;flex-wrap:nowrap!important;overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none!important;touch-action:pan-x!important;-webkit-overflow-scrolling:touch!important;overscroll-behavior-x:contain!important}
+  nav:not(.md\\:hidden)>div::-webkit-scrollbar{display:none!important}
+  nav:not(.md\\:hidden) button{flex:0 0 auto!important;white-space:nowrap!important}
 }
 </style>
 
 <script>(function(){'use strict';
 var KEY='argentas_comandas_v2',db=load(),draft=[],connected=false,syncing=false,pendingPaymentId=null;
-var importedVenderSales=(function(){var m={};try{var a=JSON.parse(localStorage.getItem('argentas_sales')||'[]');(Array.isArray(a)?a:[]).forEach(function(s){if(s&&s.id)m[String(s.id)]=true})}catch(e){}return m})();
+var importedVenderSales={};
 function importNewVenderSales(){var changed=false;try{var a=JSON.parse(localStorage.getItem('argentas_sales')||'[]');if(!Array.isArray(a))return; a.forEach(function(s){if(!s||!s.id||s.comandaId||importedVenderSales[String(s.id)])return;var lines=(s.items||[]).map(function(x){return{productId:String(x.productId||x.id||''),name:String(x.name||''),price:Number(x.price)||0,qty:Number(x.qty)||0}}).filter(function(x){return x.qty>0});if(!lines.length)return;var now=Date.now(),n=db.nextOrder++;db.orders.unshift({id:'v'+String(s.id),number:n,lines:lines,total:Number(s.total)||0,status:'pendiente',paid:true,paymentMethod:s.paymentMethod||((Number(s.transferencia)||0)>0?'Transferencia':'Efectivo'),createdAt:s.timestamp?new Date(s.timestamp).getTime():now,updatedAt:now,source:'vender'});importedVenderSales[String(s.id)]=true;changed=true});if(changed){save();renderAll();sync()}}catch(e){console.warn('No se pudieron importar ventas a Comandas',e)}}
 function pushOrderToCaja(o){try{var raw=localStorage.getItem('argentas_sales'),sales=raw?JSON.parse(raw):[];if(!Array.isArray(sales))sales=[];var sale=sales.find(function(s){return s.comandaId===o.id}),now=new Date(o.createdAt||Date.now()).toISOString();if(!sale){sale={id:'comanda-'+o.id,comandaId:o.id,fecha:now,date:now,items:[],total:0,efectivo:0,transferencia:0,tipo:'comanda',paymentMethod:'Pendiente',estadoComanda:o.status,origen:'Bluetooth'};sales.push(sale)}sale.fecha=now;sale.date=now;sale.items=o.lines.map(function(x){return{id:x.productId,name:x.name,qty:x.qty,price:x.price,total:x.qty*x.price}});sale.total=Number(o.total)||0;sale.estadoComanda=o.status;if(o.paid){sale.paymentMethod=o.paymentMethod==='Transferencia'?'Transferencia':'Efectivo';sale.efectivo=sale.paymentMethod==='Efectivo'?sale.total:0;sale.transferencia=sale.paymentMethod==='Transferencia'?sale.total:0;sale.tipo=sale.paymentMethod.toLowerCase()}else{sale.paymentMethod='Pendiente';sale.efectivo=0;sale.transferencia=0;sale.tipo='comanda'}localStorage.setItem('argentas_sales',JSON.stringify(sales))}catch(e){console.warn('No se pudo pasar la comanda a Caja',e)}}
 function importOrdersToCaja(list){(list||[]).forEach(pushOrderToCaja)}
@@ -73,7 +78,19 @@ function setStatus(id,s){var o=db.orders.find(function(x){return x.id===id});if(
 function togglePaid(id){var o=db.orders.find(function(x){return x.id===id});if(!o)return;if(o.paid){o.paid=false;o.paymentMethod=null;o.updatedAt=Date.now();save();renderAll();sync();return}pendingPaymentId=id;var m=document.getElementById('ac-pay-modal');var info=document.getElementById('ac-pay-info');if(info)info.textContent='Comanda #'+o.number+' · '+money(o.total);if(m)m.classList.add('open')}
 function renderSales(){var a=db.orders.filter(function(o){return o.status!=='cancelada'}),v=a.reduce(function(s,o){return s+o.total},0),c=a.filter(function(o){return o.paid}).reduce(function(s,o){return s+o.total},0);document.getElementById('ac-ventas').innerHTML='<div class="ac-card"><div class="ac-row"><span>Ventas</span><b>'+money(v)+'</b></div><div class="ac-row"><span>Cobrado</span><b>'+money(c)+'</b></div><div class="ac-row"><span>Deuda</span><b>'+money(v-c)+'</b></div><div class="ac-row"><span>Comandas</span><b>'+a.length+'</b></div></div>'}
 function renderAll(){refreshProductsFromArgentas();renderNew();renderOrders();renderSales();importOrdersToCaja(db.orders)}
-setInterval(importNewVenderSales,700);
+/* Detecta inmediatamente una venta cerrada en VENDER, sin importar ventas históricas. */
+(function(){
+  try{
+    var nativeSetItem=localStorage.setItem.bind(localStorage);
+    localStorage.setItem=function(k,v){
+      nativeSetItem(k,v);
+      if(k==='argentas_sales'){
+        setTimeout(function(){importNewVenderSales()},0);
+      }
+    };
+  }catch(e){}
+})();
+setInterval(importNewVenderSales,500);
 function sync(){if(syncing)return;if(connected&&window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.send(JSON.stringify({type:'state',db:db}))}
 function merge(remote){if(!remote)return;syncing=true;var om=new Map(db.orders.map(function(x){return[x.id,x]}));(remote.orders||[]).forEach(function(x){var l=om.get(x.id);if(!l||Number(x.updatedAt)>Number(l.updatedAt))om.set(x.id,x)});db.orders=Array.from(om.values()).sort(function(a,b){return b.number-a.number});importOrdersToCaja(db.orders);var pm=new Map(db.products.map(function(x){return[x.id,x]}));(remote.products||[]).forEach(function(x){var l=pm.get(x.id);if(!l||Number(x.updatedAt)>Number(l.updatedAt))pm.set(x.id,x)});db.products=Array.from(pm.values());db.nextOrder=Math.max(db.nextOrder,remote.nextOrder||1,db.orders.reduce(function(m,o){return Math.max(m,o.number+1)},1));save();renderAll();syncing=false}
 window.onBluetoothState=function(s,m){connected=s==='CONECTADO';document.getElementById('ac-btmsg').textContent=m||s;if(connected)sync()}
