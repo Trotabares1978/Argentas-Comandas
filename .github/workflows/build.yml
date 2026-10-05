@@ -35,6 +35,9 @@ jobs:
           grep -q "incomingAt<=Number(existing.updatedAt||existing.createdAt||0)" app/src/main/assets/index.html
           grep -q "28px!important" app/src/main/assets/index.html
           grep -q "argentas-vender-cancel-draft" app/src/main/assets/index.html
+          grep -q "nextDailyNumber(todayKey())" app/src/main/assets/index.html
+          grep -q "id=\"ac-undo\"" app/src/main/assets/index.html
+          grep -q "function undo()" app/src/main/assets/index.html
           grep -q "existing.status==='entregada'" app/src/main/assets/index.html
           grep -q "existing.status==='cancelada'" app/src/main/assets/index.html
           ! grep -q "existing.status==='preparando'" app/src/main/assets/index.html
