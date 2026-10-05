@@ -22,7 +22,7 @@ import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
-    private val executor = Executors.newCachedThreadPool()
+    private val executor = Executors.newCachedThreadPool()\n    private val writerExecutor = Executors.newSingleThreadExecutor()
     private val adapter: BluetoothAdapter? by lazy { BluetoothAdapter.getDefaultAdapter() }
     private var socket: BluetoothSocket? = null
     private var output: OutputStream? = null
@@ -186,7 +186,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         closeConnection()
-        executor.shutdownNow()
+        executor.shutdownNow()\n        writerExecutor.shutdownNow()
         webView.removeJavascriptInterface("ArgentasNativeBluetooth")
         super.onDestroy()
     }
