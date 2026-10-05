@@ -39,11 +39,29 @@ jobs:
           grep -q "id=\"ac-undo\"" app/src/main/assets/index.html
           grep -q "function undo()" app/src/main/assets/index.html
           grep -q "salesSnapshot()" app/src/main/assets/index.html
-          grep -q "mergeSales(remote.sales||\[\])" app/src/main/assets/index.html
+          grep -q "mergeSales(sales||\[\])" app/src/main/assets/index.html
+          grep -q "merge(m.db,m.sales||\[\])" app/src/main/assets/index.html
+          grep -q "argentas-sales-sync" app/src/main/assets/index.html
+          ! grep -q "document.addEventListener('DOMContentLoaded',install)" app/src/main/assets/index.html
+          test "$(grep -o "window.addEventListener('argentas-bluetooth'" app/src/main/assets/index.html | wc -l)" -eq 2
           grep -q "existing.lines||\[\]" app/src/main/assets/index.html
           grep -q "existing.status==='entregada'" app/src/main/assets/index.html
           grep -q "existing.status==='cancelada'" app/src/main/assets/index.html
           ! grep -q "existing.status==='preparando'" app/src/main/assets/index.html
+
+      - name: Validate embedded JavaScript
+        run: |
+          python3 - <<'PY'
+          import re, subprocess
+          from pathlib import Path
+          html=Path("app/src/main/assets/index.html").read_text(encoding="utf-8")
+          scripts=re.findall(r"<script(?:\s[^>]*)?>(.*?)</script>", html, flags=re.S|re.I)
+          for i,script in enumerate(scripts):
+              p=Path(f"/tmp/argentas-script-{i}.js")
+              p.write_text(script,encoding="utf-8")
+              subprocess.run(["node","--check",str(p)],check=True)
+          print(f"Validated {len(scripts)} embedded scripts")
+          PY
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
