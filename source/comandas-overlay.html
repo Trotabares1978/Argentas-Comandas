@@ -44,31 +44,15 @@
 <style id="argentas-comandas-nav-style">
 /* La navegación principal móvil se desplaza horizontalmente; no achica los botones. */
 @media(max-width:767px){
-  nav.md\\:hidden{overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none;touch-action:pan-x}
+  nav.md\\:hidden{overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none;touch-action:pan-x;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
   nav.md\\:hidden::-webkit-scrollbar{display:none}
 }
-</style>
-<script id="argentas-comandas-nav-script">(function(){
-'use strict';
-function addNavItem(){
-  var navs=Array.from(document.querySelectorAll('nav'));
-  var nav=navs.find(function(n){return /HOY/.test(n.textContent||'')&&/CAJA/.test(n.textContent||'')&&/HIST/.test(n.textContent||'')});
-  if(!nav||nav.querySelector('[data-argentas-comandas-nav]'))return;
-  var ref=Array.from(nav.querySelectorAll('button')).find(function(b){return /HIST|CAJA|PRODS/.test((b.textContent||'').trim())});
-  if(!ref)return;
-  var b=ref.cloneNode(true);
-  b.setAttribute('data-argentas-comandas-nav','1');
-  b.textContent='🧾 COMANDAS';
-  b.onclick=function(ev){
-    ev.preventDefault();
-    var launcher=document.getElementById('argentas-comandas-launcher');
-    if(launcher)launcher.click();
-  };
-  ref.parentElement.appendChild(b);
+@media(min-width:768px){
+  nav:not(.md\\:hidden)>div{overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none;touch-action:pan-x;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+  nav:not(.md\\:hidden)>div::-webkit-scrollbar{display:none}
 }
-function boot(){addNavItem();new MutationObserver(addNavItem).observe(document.body,{childList:true,subtree:true})}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
-})();</script>
+</style>
+
 <script>(function(){'use strict';
 var KEY='argentas_comandas_v2',db=load(),draft=[],connected=false,syncing=false,pendingPaymentId=null;
 var importedVenderSales=(function(){var m={};try{var a=JSON.parse(localStorage.getItem('argentas_sales')||'[]');(Array.isArray(a)?a:[]).forEach(function(s){if(s&&s.id)m[String(s.id)]=true})}catch(e){}return m})();
