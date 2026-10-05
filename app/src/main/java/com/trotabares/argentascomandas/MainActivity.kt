@@ -24,9 +24,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private val executor = Executors.newCachedThreadPool()
     private val writerExecutor = Executors.newSingleThreadExecutor()
+    private val connectionLock = Any()
+    @Volatile private var connectionToken = 0L
+    @Volatile private var output: OutputStream? = null
     private val adapter: BluetoothAdapter? by lazy { BluetoothAdapter.getDefaultAdapter() }
     private var socket: BluetoothSocket? = null
-    private var output: OutputStream? = null
     private var server: BluetoothServerSocket? = null
     private val uuid = UUID.fromString("7f8d7b9a-4a3d-4c0e-9b0d-2b0d6c7e9a11")
     private val permissionRequest = 4107
@@ -120,8 +122,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun establish(s: BluetoothSocket, origin: String) {
-        socket = s
-        output = s.outputStream
+        val token = synchronized(connectionLock) {
+            connectionToken += 1
+            socket = s
+            output = s.outputStream
+            connectionToken
+        }
         state("CONECTADO", origin)
         executor.execute {
             try {
@@ -149,20 +155,38 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             } catch (e: IOException) {
-                state("DESCONECTADO", e.message ?: "Conexión finalizada")
+                val current = synchronized(connectionLock) { connectionToken == token && socket === s }
+                if (current) {
+                    synchronized(connectionLock) {
+                        if (socket === s) {
+                            try { output?.close() } catch (_: Exception) {}
+                            try { socket?.close() } catch (_: Exception) {}
+                            output = null
+                            socket = null
+                            connectionToken += 1
+                        }
+                    }
+                    state("DESCONECTADO", e.message ?: "Conexión finalizada")
+                }
             }
         }
     }
 
     private fun send(message: String) {
+        if (message.length > 900 * 1024) {
+            state("ERROR", "Mensaje Bluetooth demasiado grande")
+            return
+        }
         writerExecutor.execute {
             try {
-                val out = output ?: run {
-                    state("DESCONECTADO", "No hay teléfono conectado")
-                    return@execute
+                synchronized(connectionLock) {
+                    val out = output ?: run {
+                        state("DESCONECTADO", "No hay teléfono conectado")
+                        return@synchronized
+                    }
+                    out.write((message.replace("\r", "").replace("\n", "") + "\n").toByteArray(Charsets.UTF_8))
+                    out.flush()
                 }
-                out.write((message.replace("\r", "").replace("\n", "") + "\n").toByteArray(Charsets.UTF_8))
-                out.flush()
             } catch (e: IOException) {
                 state("DESCONECTADO", e.message ?: "No se pudo enviar")
             }
@@ -170,12 +194,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun closeConnection() {
-        try { output?.close() } catch (_: Exception) {}
-        try { socket?.close() } catch (_: Exception) {}
-        try { server?.close() } catch (_: Exception) {}
-        output = null
-        socket = null
-        server = null
+        synchronized(connectionLock) {
+            connectionToken += 1
+            try { output?.close() } catch (_: Exception) {}
+            try { socket?.close() } catch (_: Exception) {}
+            try { server?.close() } catch (_: Exception) {}
+            output = null
+            socket = null
+            server = null
+        }
     }
 
     inner class NativeBluetoothBridge {
