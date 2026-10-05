@@ -3,9 +3,14 @@ package com.trotabares.argentascomandas
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
 import android.content.pm.PackageManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.webkit.JavascriptInterface
@@ -32,6 +37,23 @@ class MainActivity : AppCompatActivity() {
     private var server: BluetoothServerSocket? = null
     private val uuid = UUID.fromString("7f8d7b9a-4a3d-4c0e-9b0d-2b0d6c7e9a11")
     private val permissionRequest = 4107
+    private val discoverableRequest = 4108
+    private val discovered = linkedMapOf<String, String>()
+    private val discoveryReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                BluetoothAdapter.ACTION_FOUND -> {
+                    val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+                    if (!canConnect()) return
+                    val name = try { device.name } catch (_: SecurityException) { null }
+                    discovered[device.address] = name ?: "Dispositivo Bluetooth"
+                    publishDevices()
+                }
+                BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> state("LISTO", "Búsqueda finalizada")
+            }
+        }
+    }
+    private var receiverRegistered = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,6 +66,7 @@ class MainActivity : AppCompatActivity() {
         webView.addJavascriptInterface(NativeBluetoothBridge(), "ArgentasNativeBluetooth")
         setContentView(webView)
         ensurePermissions()
+        registerDiscoveryReceiver()
         webView.loadUrl("file:///android_asset/index.html")
     }
 
@@ -72,16 +95,59 @@ class MainActivity : AppCompatActivity() {
             JSONObject.quote(value) + "," + JSONObject.quote(message) + ");")
     }
 
+    private fun registerDiscoveryReceiver() {
+        if (receiverRegistered) return
+        val filter = IntentFilter().apply {
+            addAction(BluetoothDevice.ACTION_FOUND)
+            addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(discoveryReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(discoveryReceiver, filter)
+        }
+        receiverRegistered = true
+    }
+
+    private fun publishDevices() {
+        val arr = JSONArray()
+        discovered.toSortedMap().forEach { (address, name) ->
+            arr.put(JSONObject().put("name", name).put("address", address))
+        }
+        js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'devices',payload:{devices:" +
+            arr.toString() + "}}}));")
+    }
+
     private fun devices() {
         if (!canConnect()) { ensurePermissions(); return }
         val a = adapter ?: run { state("NO_DISPONIBLE"); return }
         if (!a.isEnabled) { state("APAGADO", "Activá Bluetooth"); return }
-        val arr = JSONArray()
-        a.bondedDevices.toList().sortedBy { it.name ?: it.address }.forEach {
-            arr.put(JSONObject().put("name", it.name ?: "Sin nombre").put("address", it.address))
+        discovered.clear()
+        try {
+            a.bondedDevices.toList().forEach {
+                discovered[it.address] = it.name ?: "Dispositivo emparejado"
+            }
+        } catch (_: SecurityException) {}
+        publishDevices()
+        try { a.cancelDiscovery() } catch (_: Exception) {}
+        state("BUSCANDO", "Buscando dispositivos Bluetooth cercanos…")
+        if (!a.startDiscovery()) state("ERROR", "No se pudo iniciar la búsqueda")
+    }
+
+    private fun makeDiscoverable() {
+        if (!canConnect()) { ensurePermissions(); return }
+        val a = adapter ?: return
+        if (!a.isEnabled) { state("APAGADO", "Activá Bluetooth"); return }
+        try {
+            val intent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
+                putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
+            }
+            startActivityForResult(intent, discoverableRequest)
+            state("VISIBLE", "Argentas quedará visible durante 5 minutos")
+        } catch (e: Exception) {
+            state("ERROR", e.message ?: "No se pudo hacer visible el dispositivo")
         }
-        js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'devices',payload:{devices:" +
-            arr.toString() + "}}}));")
     }
 
     private fun startServer() {
@@ -223,6 +289,7 @@ class MainActivity : AppCompatActivity() {
 
     inner class NativeBluetoothBridge {
         @JavascriptInterface fun refresh() { devices() }
+        @JavascriptInterface fun makeDiscoverable() { this@MainActivity.makeDiscoverable() }
         @JavascriptInterface fun startServer() { this@MainActivity.startServer() }
         @JavascriptInterface fun connect(address: String) { this@MainActivity.connect(address) }
         @JavascriptInterface fun send(message: String) { this@MainActivity.send(message) }
@@ -230,6 +297,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         closeConnection()
+        if (receiverRegistered) {
+            try { unregisterReceiver(discoveryReceiver) } catch (_: Exception) {}
+            receiverRegistered = false
+        }
         executor.shutdownNow()
         writerExecutor.shutdownNow()
         webView.removeJavascriptInterface("ArgentasNativeBluetooth")
