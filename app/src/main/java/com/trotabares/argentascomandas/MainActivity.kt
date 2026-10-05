@@ -23,7 +23,16 @@ import org.json.JSONObject
 import java.io.IOException
 import java.io.OutputStream
 import java.util.UUID
-import android.bluetooth.BluetoothClass
+import android.bluetooth.BluetoothLeAdvertiser
+import android.bluetooth.BluetoothLeScanner
+import android.bluetooth.le.AdvertiseCallback
+import android.bluetooth.le.AdvertiseData
+import android.bluetooth.le.AdvertiseSettings
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
+import android.os.ParcelUuid
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
@@ -41,32 +50,28 @@ class MainActivity : AppCompatActivity() {
     private val discoverableRequest = 4108
     private val discovered = linkedMapOf<String, String>()
     private val argentasCandidates = linkedMapOf<String, BluetoothDevice>()
-    private val discoveryReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            when (intent.action) {
-                "android.bluetooth.device.action.FOUND" -> {
-                    val device = if (Build.VERSION.SDK_INT >= 33) {
-                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
-                    } ?: return
-                    if (!canConnect() || !canScan()) return
-                    try { device.fetchUuidsWithSdp() } catch (_: Exception) {}
-                }
-                "android.bluetooth.device.action.UUID" -> {
-                    val device = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java) else @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
-                    val uuids = intent.getParcelableArrayExtra(BluetoothDevice.EXTRA_UUID) ?: return
-                    val matches = uuids.any { it.toString().equals(uuid.toString(), ignoreCase = true) }
-                    if (device != null && matches) {
-                        argentasCandidates[device.address] = device
-                        val name = try { device.name } catch (_: SecurityException) { null }
-                        discovered[device.address] = name ?: "Argentas"
-                        publishDevices()
-                    }
-                }
-                BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> state("LISTO", "Búsqueda finalizada")
-            }
+    private val bleServiceUuid = ParcelUuid(uuid)
+    private var bleAdvertiser: BluetoothLeAdvertiser? = null
+    private var bleScanner: BluetoothLeScanner? = null
+    private val bleAdvertiseCallback = object : AdvertiseCallback() {
+        override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
+            state("LISTO", "Argentas está visible para otros Argentas")
+        }
+        override fun onStartFailure(errorCode: Int) {
+            state("ERROR", "No se pudo publicar Argentas por Bluetooth ($errorCode)")
+        }
+    }
+    private val bleScanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            val device = result.device ?: return
+            val address = try { device.address } catch (_: SecurityException) { return }
+            val name = try { device.name } catch (_: SecurityException) { null }
+            argentasCandidates[address] = device
+            discovered[address] = name ?: "Argentas"
+            publishDevices()
+        }
+        override fun onScanFailed(errorCode: Int) {
+            state("ERROR", "No se pudo buscar Argentas por Bluetooth ($errorCode)")
         }
     }
     private var receiverRegistered = false
@@ -82,7 +87,6 @@ class MainActivity : AppCompatActivity() {
         webView.addJavascriptInterface(NativeBluetoothBridge(), "ArgentasNativeBluetooth")
         setContentView(webView)
         ensurePermissions()
-        registerDiscoveryReceiver()
         webView.loadUrl("file:///android_asset/index.html")
     }
 
@@ -90,21 +94,77 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val needed = arrayOf(
                 Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_CONNECT
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_ADVERTISE
             ).filter {
                 ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
             }
             if (needed.isNotEmpty()) ActivityCompat.requestPermissions(this, needed.toTypedArray(), permissionRequest)
+            else prepareArgentasBluetooth()
+        } else {
+            prepareArgentasBluetooth()
         }
     }
 
-    private fun canConnect(): Boolean =
+    private fun canAdvertise(): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
 
-    private fun canScan(): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+    private fun prepareArgentasBluetooth() {
+        if (!canConnect() || !canScan() || !canAdvertise()) return
+        val a = adapter ?: return
+        if (!a.isEnabled) {
+            state("APAGADO", "Activá Bluetooth")
+            return
+        }
+        startServer()
+        startPresenceAdvertising()
+    }
+
+    private fun startPresenceAdvertising() {
+        if (!canConnect() || !canAdvertise()) return
+        val a = adapter ?: return
+        val advertiser = a.bluetoothLeAdvertiser ?: run {
+            state("ERROR", "Este equipo no permite publicar Argentas por Bluetooth")
+            return
+        }
+        bleAdvertiser = advertiser
+        val settings = AdvertiseSettings.Builder()
+            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
+            .setConnectable(false)
+            .build()
+        val data = AdvertiseData.Builder()
+            .addServiceUuid(bleServiceUuid)
+            .setIncludeDeviceName(false)
+            .build()
+        try { advertiser.stopAdvertising(bleAdvertiseCallback) } catch (_: Exception) {}
+        advertiser.startAdvertising(settings, data, bleAdvertiseCallback)
+    }
+
+    private fun startPresenceScan() {
+        if (!canScan()) { ensurePermissions(); return }
+        val a = adapter ?: return
+        val scanner = a.bluetoothLeScanner ?: run {
+            state("ERROR", "Este equipo no permite buscar Argentas por Bluetooth")
+            return
+        }
+        bleScanner = scanner
+        val filter = ScanFilter.Builder().setServiceUuid(bleServiceUuid).build()
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+        discovered.clear()
+        argentasCandidates.clear()
+        publishDevices()
+        try { scanner.stopScan(bleScanCallback) } catch (_: Exception) {}
+        state("BUSCANDO", "Buscando únicamente Argentas abiertos…")
+        scanner.startScan(listOf(filter), settings, bleScanCallback)
+    }
+
+    private fun stopPresenceScan() {
+        try { bleScanner?.stopScan(bleScanCallback) } catch (_: Exception) {}
+    }
 
     private fun js(script: String) {
         runOnUiThread { webView.evaluateJavascript(script, null) }
@@ -113,22 +173,6 @@ class MainActivity : AppCompatActivity() {
     private fun state(value: String, message: String = "") {
         js("window.onBluetoothState&&window.onBluetoothState(" +
             JSONObject.quote(value) + "," + JSONObject.quote(message) + ");")
-    }
-
-    private fun registerDiscoveryReceiver() {
-        if (receiverRegistered) return
-        val filter = IntentFilter().apply {
-            addAction("android.bluetooth.device.action.FOUND")
-            addAction("android.bluetooth.device.action.UUID")
-            addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
-        }
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(discoveryReceiver, filter, Context.RECEIVER_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(discoveryReceiver, filter)
-        }
-        receiverRegistered = true
     }
 
     private fun publishDevices() {
@@ -141,20 +185,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun devices() {
-        if (!canConnect() || !canScan()) { ensurePermissions(); return }
+        if (!canScan() || !canConnect()) { ensurePermissions(); return }
         val a = adapter ?: run { state("NO_DISPONIBLE"); return }
         if (!a.isEnabled) { state("APAGADO", "Activá Bluetooth"); return }
-        discovered.clear()
-        argentasCandidates.clear()
-        try {
-            a.bondedDevices.toList().forEach {
-                discovered[it.address] = it.name ?: "Dispositivo emparejado"
-            }
-        } catch (_: SecurityException) {}
-        publishDevices()
-        try { a.cancelDiscovery() } catch (_: Exception) {}
-        state("BUSCANDO", "Buscando dispositivos Bluetooth cercanos…")
-        if (!a.startDiscovery()) state("ERROR", "No se pudo iniciar la búsqueda")
+        startPresenceScan()
     }
 
     private fun makeDiscoverable() {
@@ -311,14 +345,23 @@ class MainActivity : AppCompatActivity() {
 
     inner class NativeBluetoothBridge {
         @JavascriptInterface fun refresh() { devices() }
-        @JavascriptInterface fun makeDiscoverable() { this@MainActivity.makeDiscoverable() }
+        @JavascriptInterface fun makeDiscoverable() { }
         @JavascriptInterface fun startServer() { this@MainActivity.startServer() }
         @JavascriptInterface fun connect(address: String) { this@MainActivity.connect(address) }
         @JavascriptInterface fun send(message: String) { this@MainActivity.send(message) }
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == permissionRequest && grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+            prepareArgentasBluetooth()
+        }
+    }
+
     override fun onDestroy() {
         closeConnection()
+        stopPresenceScan()
+        try { bleAdvertiser?.stopAdvertising(bleAdvertiseCallback) } catch (_: Exception) {}
         if (receiverRegistered) {
             try { unregisterReceiver(discoveryReceiver) } catch (_: Exception) {}
             receiverRegistered = false
