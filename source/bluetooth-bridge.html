@@ -7,6 +7,7 @@ window.onBluetoothMessage=function(m){post('message',{message:String(m||'')});};
 window.ArgentasBluetooth={
   startServer:function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.startServer();},
   refresh:function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.refresh();},
+  makeDiscoverable:function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.makeDiscoverable();},
   connect:function(a){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.connect(String(a));},
   send:function(m){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.send(String(m));}
 };
