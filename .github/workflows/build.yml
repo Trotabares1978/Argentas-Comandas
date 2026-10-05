@@ -1,5 +1,6 @@
 name: Build Argentas-Comandas
 # build trigger
+# manual build trigger
 
 on:
   push:
