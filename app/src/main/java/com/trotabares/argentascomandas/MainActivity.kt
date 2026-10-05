@@ -23,8 +23,8 @@ import org.json.JSONObject
 import java.io.IOException
 import java.io.OutputStream
 import java.util.UUID
-import android.bluetooth.BluetoothLeAdvertiser
-import android.bluetooth.BluetoothLeScanner
+import android.bluetooth.le.BluetoothLeAdvertiser
+import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
@@ -89,6 +89,18 @@ class MainActivity : AppCompatActivity() {
         ensurePermissions()
         webView.loadUrl("file:///android_asset/index.html")
     }
+
+    private fun canConnect(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+
+    private fun canScan(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+
+    private fun canAdvertise(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
 
     private fun ensurePermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
