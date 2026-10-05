@@ -4,7 +4,12 @@ if(window.__ARGENTAS_BT_INSTALLED__)return;window.__ARGENTAS_BT_INSTALLED__=true
 function post(type,payload){try{window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:type,payload:payload}}));}catch(e){}}
 window.onBluetoothState=function(s,m){post('state',{state:s,message:m||''});};
 window.onBluetoothMessage=function(m){post('message',{message:String(m||'')});};
-window.ArgentasBluetooth={startServer:function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.startServer();},refresh:function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.refresh();},connect:function(a){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.connect(String(a));},send:function(m){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.send(String(m));}};
+window.ArgentasBluetooth={
+  startServer:function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.startServer();},
+  refresh:function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.refresh();},
+  connect:function(a){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.connect(String(a));},
+  send:function(m){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.send(String(m));}
+};
 window.addEventListener('argentas-bluetooth',function(e){
  var d=e.detail||{},p=d.payload||{};
  if(d.type==='state'){
@@ -22,13 +27,11 @@ window.addEventListener('argentas-bluetooth',function(e){
      b.type='button';
      b.textContent=(x.name||'Dispositivo')+' · '+x.address;
      b.style.cssText='display:block;width:100%;text-align:left;margin-top:8px;padding:10px 12px;border-radius:12px;background:#141414;border:1px solid #333;color:#ddd;font-size:11px;font-weight:800;';
-     b.onclick=function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.connect(x.address)};
+     b.onclick=function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.connect(x.address);};
      box.appendChild(b);
    });
  }
+ if(d.type==='message')console.log('ARGENTAS BT:',p.message||'');
 });
-
-window.addEventListener('argentas-bluetooth',function(e){var d=e.detail||{};if(d.type==='state'){var s=document.getElementById('argentas-bt-status');if(s)s.textContent=d.payload.state+(d.payload.message?' — '+d.payload.message:'');}if(d.type==='devices'){var b=document.getElementById('argentas-bt-devices');if(b){b.innerHTML='';(d.payload.devices||[]).forEach(function(x){var q=document.createElement('button');q.style.cssText='display:block;width:100%;margin-top:4px;padding:7px;text-align:left;';q.textContent=(x.name||'Dispositivo')+' • '+x.address;q.onclick=function(){window.ArgentasBluetooth.connect(x.address)};b.appendChild(q)})}}if(d.type==='message')console.log('ARGENTAS BT:',d.payload.message)});
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install);else install();
 })();
 </script>
