@@ -183,18 +183,20 @@ class MainActivity : AppCompatActivity() {
             return
         }
         writerExecutor.execute {
+            var sentOutput: OutputStream? = null
             try {
                 synchronized(connectionLock) {
                     val out = output ?: run {
                         state("DESCONECTADO", "No hay teléfono conectado")
                         return@synchronized
                     }
+                    sentOutput = out
                     out.write((message.replace("\r", "").replace("\n", "") + "\n").toByteArray(Charsets.UTF_8))
                     out.flush()
                 }
             } catch (e: IOException) {
                 synchronized(connectionLock) {
-                    if (output != null) {
+                    if (output === sentOutput) {
                         try { output?.close() } catch (_: Exception) {}
                         try { socket?.close() } catch (_: Exception) {}
                         output = null
