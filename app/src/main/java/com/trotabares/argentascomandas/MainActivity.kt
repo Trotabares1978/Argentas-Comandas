@@ -49,7 +49,7 @@ class MainActivity : AppCompatActivity() {
                         @Suppress("DEPRECATION")
                         intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                     } ?: return
-                    if (!canConnect()) return
+                    if (!canConnect() || !canScan()) return
                     val name = try { device.name } catch (_: SecurityException) { null }
                     discovered[device.address] = name ?: "Dispositivo Bluetooth"
                     publishDevices()
@@ -91,6 +91,10 @@ class MainActivity : AppCompatActivity() {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
+    private fun canScan(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+
     private fun js(script: String) {
         runOnUiThread { webView.evaluateJavascript(script, null) }
     }
@@ -125,7 +129,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun devices() {
-        if (!canConnect()) { ensurePermissions(); return }
+        if (!canConnect() || !canScan()) { ensurePermissions(); return }
         val a = adapter ?: run { state("NO_DISPONIBLE"); return }
         if (!a.isEnabled) { state("APAGADO", "Activá Bluetooth"); return }
         discovered.clear()
