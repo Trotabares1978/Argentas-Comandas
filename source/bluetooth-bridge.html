@@ -7,7 +7,6 @@ window.onBluetoothMessage=function(m){post('message',{message:String(m||'')});};
 window.ArgentasBluetooth={
   startServer:function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.startServer();},
   refresh:function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.refresh();},
-  makeDiscoverable:function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.makeDiscoverable();},
   connect:function(a){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.connect(String(a));},
   send:function(m){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.send(String(m));}
 };
@@ -22,13 +21,20 @@ window.addEventListener('argentas-bluetooth',function(e){
    if(!box)return;
    box.innerHTML='';
    var list=p.devices||[];
-   if(!list.length){box.innerHTML='<div class="text-xs text-zinc-600">No hay teléfonos emparejados.</div>';return;}
+   if(!list.length){box.innerHTML='<div class="text-xs text-zinc-600">No hay otros Argentas abiertos en este momento.</div>';return;}
    list.forEach(function(x){
      var b=document.createElement('button');
      b.type='button';
-     b.textContent=(x.name||'Dispositivo')+' · '+x.address;
-     b.style.cssText='display:block;width:100%;text-align:left;margin-top:8px;padding:10px 12px;border-radius:12px;background:#141414;border:1px solid #333;color:#ddd;font-size:11px;font-weight:800;';
-     b.onclick=function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.connect(x.address);};
+     var name=x.name||'Argentas';
+     b.textContent='📱 Argentas — '+name;
+     b.style.cssText='display:block;width:100%;text-align:left;margin-top:8px;padding:14px 12px;border-radius:12px;background:#181818;border:1px solid #E8B84A;color:#fff;font-size:12px;font-weight:900;';
+     b.onclick=function(){
+       var ok=window.confirm('¿Querés conectar con Argentas — '+name+'?');
+       if(!ok)return;
+       b.textContent='⏳ Conectando…';
+       b.disabled=true;
+       if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.connect(x.address);
+     };
      box.appendChild(b);
    });
  }
