@@ -23,6 +23,7 @@ import org.json.JSONObject
 import java.io.IOException
 import java.io.OutputStream
 import java.util.UUID
+import android.bluetooth.BluetoothClass
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
@@ -39,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private val permissionRequest = 4107
     private val discoverableRequest = 4108
     private val discovered = linkedMapOf<String, String>()
+    private val argentasCandidates = linkedMapOf<String, BluetoothDevice>()
     private val discoveryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
@@ -51,7 +53,8 @@ class MainActivity : AppCompatActivity() {
                     } ?: return
                     if (!canConnect() || !canScan()) return
                     val name = try { device.name } catch (_: SecurityException) { null }
-                    discovered[device.address] = name ?: "Dispositivo Bluetooth"
+                    argentasCandidates[device.address] = device
+                    discovered[device.address] = name ?: "Argentas"
                     publishDevices()
                 }
                 BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> state("LISTO", "Búsqueda finalizada")
@@ -133,6 +136,7 @@ class MainActivity : AppCompatActivity() {
         val a = adapter ?: run { state("NO_DISPONIBLE"); return }
         if (!a.isEnabled) { state("APAGADO", "Activá Bluetooth"); return }
         discovered.clear()
+        argentasCandidates.clear()
         try {
             a.bondedDevices.toList().forEach {
                 discovered[it.address] = it.name ?: "Dispositivo emparejado"
@@ -185,7 +189,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 closeConnection()
                 a.cancelDiscovery()
-                val device = a.getRemoteDevice(address)
+                val device = argentasCandidates[address] ?: a.getRemoteDevice(address)
                 state("CONECTANDO", device.name ?: address)
                 val s = device.createRfcommSocketToServiceRecord(uuid)
                 try {
