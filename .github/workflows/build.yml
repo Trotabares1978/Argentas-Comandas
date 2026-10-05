@@ -37,6 +37,11 @@ jobs:
           grep -q "argentas-vender-cancel-draft" app/src/main/assets/index.html
           grep -q "nextDailyNumber(todayKey())" app/src/main/assets/index.html
           grep -q "id=\"ac-undo\"" app/src/main/assets/index.html
+          grep -q "MOSTRAR DISPOSITIVOS" app/src/main/assets/index.html
+          grep -q "ARGENTAS DISPONIBLES" app/src/main/assets/index.html
+          ! grep -q "ESPERAR CONEXIÓN" app/src/main/assets/index.html
+          ! grep -q "BUSCAR VINCULADOS" app/src/main/assets/index.html
+          grep -q "¿Querés conectar con Argentas" app/src/main/assets/index.html
           grep -q "function undo()" app/src/main/assets/index.html
           grep -q "salesSnapshot()" app/src/main/assets/index.html
           grep -q "mergeSales(sales||\[\])" app/src/main/assets/index.html
