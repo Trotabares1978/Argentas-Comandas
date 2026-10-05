@@ -7,10 +7,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
 import android.content.pm.PackageManager
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.webkit.JavascriptInterface
@@ -30,7 +27,6 @@ import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
-import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.os.ParcelUuid
 import java.util.concurrent.Executors
@@ -47,7 +43,6 @@ class MainActivity : AppCompatActivity() {
     private var server: BluetoothServerSocket? = null
     private val uuid = UUID.fromString("7f8d7b9a-4a3d-4c0e-9b0d-2b0d6c7e9a11")
     private val permissionRequest = 4107
-    private val discoverableRequest = 4108
     private val discovered = linkedMapOf<String, String>()
     private val argentasCandidates = linkedMapOf<String, BluetoothDevice>()
     private val bleServiceUuid = ParcelUuid(uuid)
@@ -116,10 +111,6 @@ class MainActivity : AppCompatActivity() {
             prepareArgentasBluetooth()
         }
     }
-
-    private fun canAdvertise(): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
 
     private fun prepareArgentasBluetooth() {
         if (!canConnect() || !canScan() || !canAdvertise()) return
