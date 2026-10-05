@@ -38,6 +38,9 @@ jobs:
           grep -q "nextDailyNumber(todayKey())" app/src/main/assets/index.html
           grep -q "id=\"ac-undo\"" app/src/main/assets/index.html
           grep -q "function undo()" app/src/main/assets/index.html
+          grep -q "salesSnapshot()" app/src/main/assets/index.html
+          grep -q "mergeSales(remote.sales||\[\])" app/src/main/assets/index.html
+          grep -q "existing.lines||\[\]" app/src/main/assets/index.html
           grep -q "existing.status==='entregada'" app/src/main/assets/index.html
           grep -q "existing.status==='cancelada'" app/src/main/assets/index.html
           ! grep -q "existing.status==='preparando'" app/src/main/assets/index.html
