@@ -27,6 +27,7 @@ import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
+import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.os.ParcelUuid
 import java.util.concurrent.Executors
@@ -161,7 +162,17 @@ class MainActivity : AppCompatActivity() {
         publishDevices()
         try { scanner.stopScan(bleScanCallback) } catch (_: Exception) {}
         state("BUSCANDO", "Buscando únicamente Argentas abiertos…")
-        scanner.startScan(listOf(filter), settings, bleScanCallback)
+        try {
+            scanner.startScan(listOf(filter), settings, bleScanCallback)
+        } catch (e: Exception) {
+            state("ERROR", e.message ?: "No se pudo iniciar la búsqueda")
+            return
+        }
+        executor.execute {
+            try { Thread.sleep(8000) } catch (_: InterruptedException) { return@execute }
+            try { scanner.stopScan(bleScanCallback) } catch (_: Exception) {}
+            state("LISTO", if (discovered.isEmpty()) "No hay otros Argentas abiertos en este momento." else "Búsqueda finalizada")
+        }
     }
 
     private fun stopPresenceScan() {
@@ -191,21 +202,6 @@ class MainActivity : AppCompatActivity() {
         val a = adapter ?: run { state("NO_DISPONIBLE"); return }
         if (!a.isEnabled) { state("APAGADO", "Activá Bluetooth"); return }
         startPresenceScan()
-    }
-
-    private fun makeDiscoverable() {
-        if (!canConnect()) { ensurePermissions(); return }
-        val a = adapter ?: return
-        if (!a.isEnabled) { state("APAGADO", "Activá Bluetooth"); return }
-        try {
-            val intent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
-                putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
-            }
-            startActivityForResult(intent, discoverableRequest)
-            state("VISIBLE", "Argentas quedará visible durante 5 minutos")
-        } catch (e: Exception) {
-            state("ERROR", e.message ?: "No se pudo hacer visible el dispositivo")
-        }
     }
 
     private fun startServer() {
@@ -347,7 +343,6 @@ class MainActivity : AppCompatActivity() {
 
     inner class NativeBluetoothBridge {
         @JavascriptInterface fun refresh() { devices() }
-        @JavascriptInterface fun makeDiscoverable() { }
         @JavascriptInterface fun startServer() { this@MainActivity.startServer() }
         @JavascriptInterface fun connect(address: String) { this@MainActivity.connect(address) }
         @JavascriptInterface fun send(message: String) { this@MainActivity.send(message) }
