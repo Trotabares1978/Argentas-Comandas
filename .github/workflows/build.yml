@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-      - "feature/**"
+      - "feature/bluetooth-base"
   workflow_dispatch:
 
 jobs:
