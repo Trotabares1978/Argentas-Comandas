@@ -42,7 +42,7 @@ class MainActivity : AppCompatActivity() {
     private val discoveryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                BluetoothAdapter.ACTION_FOUND -> {
+                "android.bluetooth.device.action.FOUND" -> {
                     val device = if (Build.VERSION.SDK_INT >= 33) {
                         intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
                     } else {
