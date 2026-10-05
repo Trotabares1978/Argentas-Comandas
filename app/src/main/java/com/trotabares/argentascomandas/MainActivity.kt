@@ -52,10 +52,18 @@ class MainActivity : AppCompatActivity() {
                         intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                     } ?: return
                     if (!canConnect() || !canScan()) return
-                    val name = try { device.name } catch (_: SecurityException) { null }
-                    argentasCandidates[device.address] = device
-                    discovered[device.address] = name ?: "Argentas"
-                    publishDevices()
+                    try { device.fetchUuidsWithSdp() } catch (_: Exception) {}
+                }
+                "android.bluetooth.device.action.UUID" -> {
+                    val device = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java) else @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                    val uuids = intent.getParcelableArrayExtra(BluetoothDevice.EXTRA_UUID) ?: return
+                    val matches = uuids.any { it.toString().equals(uuid.toString(), ignoreCase = true) }
+                    if (device != null && matches) {
+                        argentasCandidates[device.address] = device
+                        val name = try { device.name } catch (_: SecurityException) { null }
+                        discovered[device.address] = name ?: "Argentas"
+                        publishDevices()
+                    }
                 }
                 BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> state("LISTO", "Búsqueda finalizada")
             }
@@ -111,6 +119,7 @@ class MainActivity : AppCompatActivity() {
         if (receiverRegistered) return
         val filter = IntentFilter().apply {
             addAction("android.bluetooth.device.action.FOUND")
+            addAction("android.bluetooth.device.action.UUID")
             addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
         }
         if (Build.VERSION.SDK_INT >= 33) {
