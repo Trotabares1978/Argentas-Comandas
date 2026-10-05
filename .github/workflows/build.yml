@@ -33,7 +33,7 @@ jobs:
           grep -q "data-order-tap" app/src/main/assets/index.html
           grep -q "setStatus(id,'oculta')" app/src/main/assets/index.html
           grep -q "incomingAt<=Number(existing.updatedAt||existing.createdAt||0)" app/src/main/assets/index.html
-          grep -q "28px!important" app/src/main/assets/index.html
+          grep -q "30px!important" app/src/main/assets/index.html
           grep -q "argentas-vender-cancel-draft" app/src/main/assets/index.html
           grep -q "nextDailyNumber(todayKey())" app/src/main/assets/index.html
           grep -q "id=\"ac-undo\"" app/src/main/assets/index.html
