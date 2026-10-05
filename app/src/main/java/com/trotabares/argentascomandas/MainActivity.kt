@@ -23,7 +23,7 @@ import java.util.concurrent.Executors
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private val executor = Executors.newCachedThreadPool()
-    private val writerExecutor = Executors.newSingleThreadExecutor() = Executors.newSingleThreadExecutor()
+    private val writerExecutor = Executors.newSingleThreadExecutor()
     private val adapter: BluetoothAdapter? by lazy { BluetoothAdapter.getDefaultAdapter() }
     private var socket: BluetoothSocket? = null
     private var output: OutputStream? = null
