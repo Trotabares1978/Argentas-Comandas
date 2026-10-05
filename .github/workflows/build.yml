@@ -24,6 +24,13 @@ jobs:
       - name: Prepare Argentas original + Comandas
         run: python3 scripts/prepare_argentas.py
 
+      - name: Verify generated Comandas source
+        run: |
+          test -s app/src/main/assets/index.html
+          grep -q "status:'recibido'" app/src/main/assets/index.html
+          grep -q "argentas-vender-cancel-draft" app/src/main/assets/index.html
+          grep -q "existing.status==='preparando'" app/src/main/assets/index.html
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
