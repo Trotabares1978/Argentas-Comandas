@@ -43,7 +43,12 @@ class MainActivity : AppCompatActivity() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 BluetoothAdapter.ACTION_FOUND -> {
-                    val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+                    val device = if (Build.VERSION.SDK_INT >= 33) {
+                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                    } ?: return
                     if (!canConnect()) return
                     val name = try { device.name } catch (_: SecurityException) { null }
                     discovered[device.address] = name ?: "Dispositivo Bluetooth"
@@ -98,11 +103,11 @@ class MainActivity : AppCompatActivity() {
     private fun registerDiscoveryReceiver() {
         if (receiverRegistered) return
         val filter = IntentFilter().apply {
-            addAction(BluetoothDevice.ACTION_FOUND)
+            addAction("android.bluetooth.device.action.FOUND")
             addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
         }
         if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(discoveryReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            registerReceiver(discoveryReceiver, filter, Context.RECEIVER_EXPORTED)
         } else {
             @Suppress("DEPRECATION")
             registerReceiver(discoveryReceiver, filter)
