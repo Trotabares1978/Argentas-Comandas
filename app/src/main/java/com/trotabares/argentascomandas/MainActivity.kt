@@ -113,8 +113,13 @@ class MainActivity : AppCompatActivity() {
                 val device = a.getRemoteDevice(address)
                 state("CONECTANDO", device.name ?: address)
                 val s = device.createRfcommSocketToServiceRecord(uuid)
-                s.connect()
-                establish(s, "saliente")
+                try {
+                    s.connect()
+                    establish(s, "saliente")
+                } catch (e: IOException) {
+                    try { s.close() } catch (_: Exception) {}
+                    throw e
+                }
             } catch (e: IOException) {
                 state("DESCONECTADO", e.message ?: "Falló la conexión")
             }
@@ -188,6 +193,15 @@ class MainActivity : AppCompatActivity() {
                     out.flush()
                 }
             } catch (e: IOException) {
+                synchronized(connectionLock) {
+                    if (output != null) {
+                        try { output?.close() } catch (_: Exception) {}
+                        try { socket?.close() } catch (_: Exception) {}
+                        output = null
+                        socket = null
+                        connectionToken += 1
+                    }
+                }
                 state("DESCONECTADO", e.message ?: "No se pudo enviar")
             }
         }
