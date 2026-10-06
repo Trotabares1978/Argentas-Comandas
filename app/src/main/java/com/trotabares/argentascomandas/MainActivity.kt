@@ -128,7 +128,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
         startServer()
-        startPresenceAdvertising()
     }
 
     private fun startPresenceAdvertising() {
