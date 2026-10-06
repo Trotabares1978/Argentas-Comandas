@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebChromeClient
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import org.json.JSONArray
@@ -79,6 +80,7 @@ class MainActivity : AppCompatActivity() {
         webView.settings.domStorageEnabled = true
         webView.settings.allowFileAccess = true
         webView.webViewClient = WebViewClient()
+        webView.webChromeClient = WebChromeClient()
         webView.addJavascriptInterface(NativeBluetoothBridge(), "ArgentasNativeBluetooth")
         setContentView(webView)
         ensurePermissions()
