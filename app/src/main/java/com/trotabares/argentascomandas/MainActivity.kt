@@ -214,6 +214,7 @@ class MainActivity : AppCompatActivity() {
     private val bleLock = Any()
     private var bleGatt: android.bluetooth.BluetoothGatt? = null
     private var bleCharacteristic: android.bluetooth.BluetoothGattCharacteristic? = null
+    private var serverCharacteristic: android.bluetooth.BluetoothGattCharacteristic? = null
     private var gattServer: android.bluetooth.BluetoothGattServer? = null
     @Volatile private var gattServiceReady = false
     @Volatile private var gattPeer: BluetoothDevice? = null
@@ -335,6 +336,9 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             override fun onDescriptorWriteRequest(device: BluetoothDevice, requestId: Int, descriptor: android.bluetooth.BluetoothGattDescriptor, preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
+                if (descriptor.uuid == DESCRIPTOR_UUID && value.contentEquals(android.bluetooth.BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)) {
+                    gattPeer = device
+                }
                 if (responseNeeded) gattServer?.sendResponse(device, requestId, android.bluetooth.BluetoothGatt.GATT_SUCCESS, offset, ByteArray(0))
             }
             override fun onCharacteristicWriteRequest(device: BluetoothDevice, requestId: Int, characteristic: android.bluetooth.BluetoothGattCharacteristic, preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
@@ -357,6 +361,7 @@ class MainActivity : AppCompatActivity() {
         )
         characteristic.addDescriptor(android.bluetooth.BluetoothGattDescriptor(DESCRIPTOR_UUID, android.bluetooth.BluetoothGattDescriptor.PERMISSION_READ or android.bluetooth.BluetoothGattDescriptor.PERMISSION_WRITE))
         service.addCharacteristic(characteristic)
+        serverCharacteristic = characteristic
         gattServiceReady = false
         gattServer = opened
         if (!opened.addService(service)) { opened.close(); gattServer = null; state("ERROR", "No se pudo publicar el canal BLE de Argentas"); return }
@@ -372,7 +377,7 @@ class MainActivity : AppCompatActivity() {
         synchronized(bleLock) {
             try { bleGatt?.disconnect() } catch (_: Exception) {}
             try { bleGatt?.close() } catch (_: Exception) {}
-            bleGatt = null; bleCharacteristic = null; bleIncoming.setLength(0)
+            bleGatt = null; bleCharacteristic = null; serverCharacteristic = null; bleIncoming.setLength(0)
         }
         state("CONECTANDO", "Conectando directamente con Argentas…")
         executor.execute {
@@ -383,6 +388,27 @@ class MainActivity : AppCompatActivity() {
                 device.connectGatt(this@MainActivity, false, bleGattCallback)
             }
             synchronized(bleLock) { bleGatt = gatt }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun sendBleFromServer(message: String) {
+        val server = gattServer ?: return
+        val device = gattPeer ?: return
+        val characteristic = serverCharacteristic ?: return
+        val payload = (message.replace("\r", "").replace("\n", "") + "\n").toByteArray(Charsets.UTF_8)
+        writerExecutor.execute {
+            var offset = 0
+            while (offset < payload.size) {
+                val end = minOf(offset + 20, payload.size)
+                characteristic.value = payload.copyOfRange(offset, end)
+                if (!server.notifyCharacteristicChanged(device, characteristic, false)) {
+                    state("DESCONECTADO", "BLE: no se pudo notificar al otro Argentas")
+                    return@execute
+                }
+                offset = end
+                try { Thread.sleep(55) } catch (_: InterruptedException) { return@execute }
+            }
         }
     }
 
@@ -406,14 +432,26 @@ class MainActivity : AppCompatActivity() {
         val characteristic = synchronized(bleLock) { bleCharacteristic }
         if (gatt == null || characteristic == null) { state("DESCONECTADO", "No hay conexión BLE activa"); return }
         val payload = (message.replace("\r", "").replace("\n", "") + "\n").toByteArray(Charsets.UTF_8)
-        executor.execute {
+        writerExecutor.execute {
             var offset = 0
             while (offset < payload.size) {
-                val end = minOf(offset + 180, payload.size)
-                characteristic.value = payload.copyOfRange(offset, end)
-                if (!gatt.writeCharacteristic(characteristic)) { state("DESCONECTADO", "BLE: no se pudo iniciar el envío"); return@execute }
+                val end = minOf(offset + 20, payload.size)
+                val chunk = payload.copyOfRange(offset, end)
+                var started = false
+                repeat(8) {
+                    characteristic.value = chunk
+                    if (gatt.writeCharacteristic(characteristic)) {
+                        started = true
+                        return@repeat
+                    }
+                    try { Thread.sleep(80) } catch (_: InterruptedException) { return@execute }
+                }
+                if (!started) {
+                    state("DESCONECTADO", "BLE: el canal está ocupado o no acepta el envío")
+                    return@execute
+                }
                 offset = end
-                try { Thread.sleep(50) } catch (_: InterruptedException) { return@execute }
+                try { Thread.sleep(55) } catch (_: InterruptedException) { return@execute }
             }
         }
     }
