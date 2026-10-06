@@ -8,6 +8,8 @@ window.ArgentasBluetooth={
   startServer:function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.startServer();},
   refresh:function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.refresh();},
   connect:function(a){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.connect(String(a));},
+  acceptIncoming:function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.acceptIncoming();},
+  rejectIncoming:function(){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.rejectIncoming();},
   send:function(m){if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.send(String(m));}
 };
 window.addEventListener('argentas-bluetooth',function(e){
@@ -15,6 +17,15 @@ window.addEventListener('argentas-bluetooth',function(e){
  if(d.type==='state'){
    var s=document.getElementById('argentas-bt-status');
    if(s)s.textContent=p.state+(p.message?' — '+p.message:'');
+ }
+ if(d.type==='state'&&p.state==='SOLICITUD'){
+   var incomingName=p.message||'otro dispositivo';
+   var accepted=window.confirm('¿Querés aceptar la conexión de Argentas — '+incomingName+'?');
+   if(accepted){
+     if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.acceptIncoming();
+   }else{
+     if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.rejectIncoming();
+   }
  }
  if(d.type==='devices'){
    var box=document.getElementById('argentas-bt-devices');
