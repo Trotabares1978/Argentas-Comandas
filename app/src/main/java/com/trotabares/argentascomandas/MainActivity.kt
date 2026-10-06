@@ -479,7 +479,6 @@ class MainActivity : AppCompatActivity() {
             gattServer = null
             gattServiceReady = false
             gattPeer = null
-            try { gattDiscoveryExecutor.shutdownNow() } catch (_: Exception) {}
         }
         synchronized(connectionLock) {
             connectionToken += 1
