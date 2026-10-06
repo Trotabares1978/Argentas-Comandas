@@ -51,6 +51,8 @@ class MainActivity : AppCompatActivity() {
     private val discovered = linkedMapOf<String, String>()
     private val argentasCandidates = linkedMapOf<String, BluetoothDevice>()
     private val bleServiceUuid = ParcelUuid(uuid)
+    @Volatile private var pendingIncomingSocket: BluetoothSocket? = null
+    @Volatile private var pendingIncomingToken = 0L
     private var bleAdvertiser: BluetoothLeAdvertiser? = null
     private var bleScanner: BluetoothLeScanner? = null
     private val bleAdvertiseCallback = object : AdvertiseCallback() {
@@ -267,7 +269,14 @@ class MainActivity : AppCompatActivity() {
             output = s.outputStream
             connectionToken
         }
-        state("CONECTADO", origin)
+        if (origin == "entrante") {
+            pendingIncomingSocket = s
+            pendingIncomingToken = token
+            state("SOLICITUD", "Un Argentas quiere conectarse")
+        } else {
+            state("CONECTANDO", "Esperando aceptación del otro dispositivo…")
+            sendHandshake(s, JSONObject().put("type", "argentas_connect_request").put("name", localDeviceName()).toString())
+        }
         executor.execute {
             try {
                 val input = s.inputStream
@@ -283,9 +292,40 @@ class MainActivity : AppCompatActivity() {
                         if (end < 0) break
                         val message = pending.substring(0, end).trimEnd('\r')
                         pending.delete(0, end + 1)
-                        if (message.isNotEmpty()) {
-                            js("window.onBluetoothMessage&&window.onBluetoothMessage(" +
-                                JSONObject.quote(message) + ");")
+                        if (message.isEmpty()) continue
+                        try {
+                            val obj = JSONObject(message)
+                            when (obj.optString("type")) {
+                                "argentas_connect_request" -> {
+                                    val name = obj.optString("name", "Argentas")
+                                    pendingIncomingSocket = s
+                                    pendingIncomingToken = token
+                                    state("SOLICITUD", name)
+                                }
+                                "argentas_connect_accept" -> {
+                                    val current = synchronized(connectionLock) { connectionToken == token && socket === s }
+                                    if (current) {
+                                        pendingIncomingSocket = null
+                                        state("CONECTADO", "Conectado con Argentas")
+                                        js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'authorized'}}));")
+                                    }
+                                }
+                                "argentas_connect_reject" -> {
+                                    state("DESCONECTADO", "La conexión fue rechazada por el otro dispositivo.")
+                                    closeSpecificConnection(s, token)
+                                }
+                                else -> {
+                                    val authorized = synchronized(connectionLock) { connectionToken == token && socket === s && pendingIncomingSocket !== s }
+                                    if (authorized) {
+                                        js("window.onBluetoothMessage&&window.onBluetoothMessage(" + JSONObject.quote(message) + ");")
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {
+                            val authorized = synchronized(connectionLock) { connectionToken == token && socket === s && pendingIncomingSocket !== s }
+                            if (authorized) {
+                                js("window.onBluetoothMessage&&window.onBluetoothMessage(" + JSONObject.quote(message) + ");")
+                            }
                         }
                     }
                     if (pending.length > 1024 * 1024) {
@@ -296,19 +336,59 @@ class MainActivity : AppCompatActivity() {
             } catch (e: IOException) {
                 val current = synchronized(connectionLock) { connectionToken == token && socket === s }
                 if (current) {
-                    synchronized(connectionLock) {
-                        if (socket === s) {
-                            try { output?.close() } catch (_: Exception) {}
-                            try { socket?.close() } catch (_: Exception) {}
-                            output = null
-                            socket = null
-                            connectionToken += 1
-                        }
-                    }
+                    closeSpecificConnection(s, token)
                     state("DESCONECTADO", e.message ?: "Conexión finalizada")
                 }
             }
         }
+    }
+
+    private fun localDeviceName(): String {
+        if (!canConnect()) return "Argentas"
+        return try { adapter?.name ?: "Argentas" } catch (_: SecurityException) { "Argentas" }
+    }
+
+    private fun sendHandshake(s: BluetoothSocket, message: String) {
+        writerExecutor.execute {
+            try {
+                val out = s.outputStream
+                out.write((message.replace("\r", "").replace("\n", "") + "\n").toByteArray(Charsets.UTF_8))
+                out.flush()
+            } catch (_: Exception) {
+                closeSpecificConnection(s, synchronized(connectionLock) { connectionToken })
+            }
+        }
+    }
+
+    private fun closeSpecificConnection(s: BluetoothSocket, token: Long) {
+        synchronized(connectionLock) {
+            if (connectionToken != token || socket !== s) return
+            try { output?.close() } catch (_: Exception) {}
+            try { socket?.close() } catch (_: Exception) {}
+            output = null
+            socket = null
+            pendingIncomingSocket = null
+            connectionToken += 1
+        }
+    }
+
+    private fun acceptIncoming() {
+        val s = pendingIncomingSocket ?: return
+        val token = pendingIncomingToken
+        if (s !== socket) return
+        sendHandshake(s, JSONObject().put("type", "argentas_connect_accept").toString())
+        pendingIncomingSocket = null
+        state("CONECTADO", "Conectado con Argentas")
+        js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'authorized'}}));")
+    }
+
+    private fun rejectIncoming() {
+        val s = pendingIncomingSocket ?: return
+        val token = pendingIncomingToken
+        if (s !== socket) return
+        sendHandshake(s, JSONObject().put("type", "argentas_connect_reject").toString())
+        closeSpecificConnection(s, token)
+        state("LISTO", "Solicitud rechazada")
     }
 
     private fun send(message: String) {
@@ -359,6 +439,8 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun refresh() { devices() }
         @JavascriptInterface fun startServer() { this@MainActivity.startServer() }
         @JavascriptInterface fun connect(address: String) { this@MainActivity.connect(address) }
+        @JavascriptInterface fun acceptIncoming() { this@MainActivity.acceptIncoming() }
+        @JavascriptInterface fun rejectIncoming() { this@MainActivity.rejectIncoming() }
         @JavascriptInterface fun send(message: String) { this@MainActivity.send(message) }
     }
 
