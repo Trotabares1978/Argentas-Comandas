@@ -215,6 +215,8 @@ class MainActivity : AppCompatActivity() {
     private var bleGatt: android.bluetooth.BluetoothGatt? = null
     private var bleCharacteristic: android.bluetooth.BluetoothGattCharacteristic? = null
     private var gattServer: android.bluetooth.BluetoothGattServer? = null
+    @Volatile private var gattServiceReady = false
+    @Volatile private var gattPeer: BluetoothDevice? = null
     private val bleIncoming = StringBuilder()
     private val CHARACTERISTIC_UUID = UUID.fromString("7f8d7b9a-4a3d-4c0e-9b0d-2b0d6c7e9a12")
     private val DESCRIPTOR_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
@@ -237,13 +239,13 @@ class MainActivity : AppCompatActivity() {
 
         override fun onServicesDiscovered(gatt: android.bluetooth.BluetoothGatt, status: Int) {
             if (status != android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
-                state("DESCONECTADO", "BLE: no se pudieron descubrir los servicios")
+                state("DESCONECTADO", "BLE: descubrimiento de servicios falló ($status)")
                 return
             }
             val service = gatt.getService(uuid)
             val characteristic = service?.getCharacteristic(CHARACTERISTIC_UUID)
             if (characteristic == null) {
-                state("DESCONECTADO", "BLE: Argentas no expuso el canal esperado")
+                state("DESCONECTADO", "BLE conectado, pero el servicio Argentas todavía no está disponible")
                 return
             }
             if (!gatt.setCharacteristicNotification(characteristic, true)) {
@@ -292,6 +294,16 @@ class MainActivity : AppCompatActivity() {
         if (gattServer != null) return
         val manager = getSystemService(BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager
         val opened = manager.openGattServer(this, object : android.bluetooth.BluetoothGattServerCallback() {
+            override fun onServiceAdded(status: Int, service: android.bluetooth.BluetoothGattService) {
+                if (service.uuid == uuid && status == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
+                    gattServiceReady = true
+                    state("ESPERANDO", "Argentas listo para conexión BLE")
+                    startPresenceAdvertising()
+                } else if (service.uuid == uuid) {
+                    gattServiceReady = false
+                    state("ERROR", "No se pudo publicar el servicio BLE de Argentas ($status)")
+                }
+            }
             override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
                 if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) state("ESPERANDO", "Argentas disponible para conexión BLE…")
             }
@@ -318,9 +330,10 @@ class MainActivity : AppCompatActivity() {
         )
         characteristic.addDescriptor(android.bluetooth.BluetoothGattDescriptor(DESCRIPTOR_UUID, android.bluetooth.BluetoothGattDescriptor.PERMISSION_READ or android.bluetooth.BluetoothGattDescriptor.PERMISSION_WRITE))
         service.addCharacteristic(characteristic)
-        if (!opened.addService(service)) { opened.close(); state("ERROR", "No se pudo publicar el canal BLE de Argentas"); return }
+        gattServiceReady = false
         gattServer = opened
-        state("ESPERANDO", "Argentas listo para conexión BLE")
+        if (!opened.addService(service)) { opened.close(); gattServer = null; state("ERROR", "No se pudo publicar el canal BLE de Argentas"); return }
+        state("ESPERANDO", "Preparando canal BLE de Argentas…")
     }
 
     @SuppressLint("MissingPermission")
@@ -428,6 +441,8 @@ class MainActivity : AppCompatActivity() {
             bleGatt = null; bleCharacteristic = null; bleIncoming.setLength(0)
             try { gattServer?.close() } catch (_: Exception) {}
             gattServer = null
+            gattServiceReady = false
+            gattPeer = null
         }
         synchronized(connectionLock) {
             connectionToken += 1
