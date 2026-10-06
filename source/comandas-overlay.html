@@ -107,6 +107,31 @@ window.onBluetoothState=function(s,m){connected=s==='CONECTADO';var msg=document
 window.onBluetoothMessage=function(raw){raw.trim().split('\n').filter(Boolean).forEach(function(line){try{var m=JSON.parse(line);if(m.type==='state')merge(m.db,m.sales||[]);else if(m.type==='hello'){if(connected)setTimeout(function(){if(connected)sync()},150)}}catch(e){console.warn('Mensaje de sincronización inválido',e)}})}
 window.addEventListener('argentas-bluetooth',function(e){if(!e.detail||e.detail.type!=='devices')return;var s=document.getElementById('ac-devices');if(!s)return;s.innerHTML='';var list=e.detail.payload.devices||[];if(!list.length){s.innerHTML='<div class="ac-muted">No hay otros Argentas abiertos en este momento.</div>';return;}list.forEach(function(x){var b=document.createElement('button');b.type='button';b.className='ac-btn ac-dark';b.style.cssText='display:block;width:100%;text-align:left;margin-top:8px;padding:14px;border:1px solid #444;border-radius:12px;background:#181818;color:#fff;font-weight:900;';b.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span>📱 '+(x.name||'Argentas')+'</span><span style="padding:7px 11px;border-radius:999px;background:#E8B84A;color:#111;font-size:10px;font-weight:900;letter-spacing:.08em">CONECTAR</span></div>';b.onclick=function(){var ok=window.confirm('¿Querés conectar con Argentas — '+(x.name||'Argentas')+'?');if(!ok)return;b.innerHTML='<span>⏳ Conectando con '+(x.name||'Argentas')+'…</span>';b.disabled=true;if(window.ArgentasNativeBluetooth)window.ArgentasNativeBluetooth.connect(x.address)};s.appendChild(b)})});
 function openArgentasComandas(){var p=document.getElementById('argentas-comandas-panel');if(!p)return;p.classList.add('open');refreshProductsFromArgentas();importVenderDraftFromStorage();importNewVenderSales();importOrdersToCaja(db.orders);renderAll();var listTab=document.querySelector('#argentas-comandas-panel .ac-tabs button[data-ac-tab="lista"]');if(listTab)listTab.click()}document.getElementById('argentas-comandas-launcher').onclick=openArgentasComandas;document.getElementById('argentas-comandas-mobile-tab').onclick=openArgentasComandas;window.addEventListener('open-argentas-comandas',openArgentasComandas);window.openArgentasComandas=openArgentasComandas;document.addEventListener('click',function(e){var b=e.target&&e.target.closest&&e.target.closest('#argentas-comandas-mobile-tab,#argentas-comandas-launcher');if(b){e.preventDefault();e.stopPropagation();openArgentasComandas()}},true);
+function hookOriginalPaymentSelection(){
+document.addEventListener('click',function(e){
+  try{
+    var target=e.target&&e.target.closest?e.target.closest('button,[role="button"],label'):null;
+    if(!target||target.closest('#ac-pay-modal'))return;
+    var txt=String(target.textContent||'').replace(/\s+/g,' ').trim().toLowerCase();
+    var mode=txt==='efectivo'||txt.indexOf('efectivo')>=0?'Efectivo':(txt==='combinada'||txt.indexOf('combinad')>=0||txt.indexOf('pago mixto')>=0?'Combinada':'');
+    if(!mode)return;
+    setTimeout(function(){
+      try{
+        importVenderDraftFromStorage();
+        var raw=localStorage.getItem('argentas_vender_draft'),s=raw?JSON.parse(raw):null;
+        if(!s||!s.id)return;
+        var oid='v'+String(s.id),o=db.orders.find(function(x){return x.id===oid});
+        if(!o){registerVenderDraft(s);o=db.orders.find(function(x){return x.id===oid})}
+        if(o&&!o.paid){
+          o.paymentMethod=mode;o.updatedAt=Date.now();save();renderAll();sync();
+          maybeOpenPaymentForVender(Object.assign({},s,{paymentMethod:mode}),oid);
+        }
+      }catch(err){console.warn('No se pudo detectar la forma de pago seleccionada',err)}
+    },120);
+  }catch(err){console.warn('No se pudo enganchar la selección de pago',err)}
+},true);
+}
+hookOriginalPaymentSelection();
 document.querySelectorAll('[data-pay-key]').forEach(function(b){b.onclick=function(){var k=b.getAttribute('data-pay-key'),v=paymentField==='transfer'?paymentTransfer:paymentReceived;if(k==='clear')v=0;else if(k==='back')v=Math.floor(v/10);else v=Math.min(999999999,Number(String(v)+k));if(paymentField==='transfer')paymentTransfer=v;else paymentReceived=v;updateCashPayment()}});var st=document.getElementById('ac-pay-select-transfer'),sc=document.getElementById('ac-pay-select-cash');if(st)st.onclick=function(){paymentField='transfer';updateCashPayment()};if(sc)sc.onclick=function(){paymentField='cash';updateCashPayment()};document.getElementById('ac-pay-exact').onclick=function(){var o=db.orders.find(function(x){return x.id===pendingPaymentId});if(o){if(paymentCombined){paymentField='cash';paymentReceived=Math.max(0,Number(o.total)-Number(paymentTransfer||0))}else paymentReceived=Number(o.total)||0;updateCashPayment();confirmCashPayment()}};document.getElementById('ac-pay-confirm').onclick=confirmCashPayment;document.getElementById('ac-pay-cancel').onclick=closeCashPayment;document.getElementById('ac-undo').onclick=undo;document.getElementById('ac-close').onclick=function(){document.getElementById('argentas-comandas-panel').classList.remove('open')};document.getElementById('ac-clear').onclick=function(){draft=[];renderDraft()};document.getElementById('ac-create').onclick=createOrder;
 document.getElementById('ac-refresh').onclick=function(){if(window.ArgentasNativeBluetooth){window.ArgentasNativeBluetooth.refresh();var m=document.getElementById('ac-btmsg');if(m)m.textContent='🔎 Buscando dispositivos Wi-Fi Direct cercanos…'}};
 document.querySelectorAll('#argentas-comandas-panel .ac-tabs button').forEach(function(b){b.onclick=function(){document.querySelectorAll('#argentas-comandas-panel .ac-tabs button').forEach(function(x){x.classList.remove('on')});b.classList.add('on');['nueva','lista','ventas','bt'].forEach(function(x){document.getElementById('ac-'+x).style.display=x===b.dataset.acTab?'block':'none'});if(b.dataset.acTab==='bt'&&window.ArgentasNativeBluetooth){window.ArgentasNativeBluetooth.refresh();var m=document.getElementById('ac-btmsg');if(m)m.textContent='Listo. Tocá «Mostrar dispositivos» para buscar equipos cercanos.';}renderAll()}});
