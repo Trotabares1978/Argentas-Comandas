@@ -506,7 +506,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun send(message: String) {
         if (message.length > 900 * 1024) { state("ERROR", "Mensaje Bluetooth demasiado grande"); return }
-        sendBle(message)
+        val clientConnected = synchronized(bleLock) { bleGatt != null && bleCharacteristic != null }
+        if (clientConnected) sendBle(message) else sendBleFromServer(message)
     }
 
     private fun closeConnection() {
