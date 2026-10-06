@@ -338,31 +338,41 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startP2PServer() {
-        if (p2pServer != null || p2pConnected) return
+        if (p2pServer != null) return
 
         executor.execute {
             try {
                 val server = ServerSocket(wifiPort)
+                server.reuseAddress = true
                 p2pServer = server
 
                 state("CONECTANDO", "Esperando al otro Argentas…")
 
-                val socket = server.accept()
-
-                try {
-                    server.close()
-                } catch (_: Exception) {
+                while (!server.isClosed && !isFinishing) {
+                    try {
+                        val socket = server.accept()
+                        if (p2pConnected) {
+                            try {
+                                socket.close()
+                            } catch (_: Exception) {
+                            }
+                        } else {
+                            attachP2PSocket(socket)
+                        }
+                    } catch (_: Exception) {
+                        if (server.isClosed || isFinishing) break
+                    }
                 }
-                p2pServer = null
-
-                attachP2PSocket(socket)
             } catch (_: Exception) {
-                p2pServer = null
                 if (!isFinishing && !p2pConnected) {
                     state(
                         "DESCONECTADO",
                         "No se pudo abrir el canal local de datos"
                     )
+                }
+            } finally {
+                if (p2pServer?.isClosed != false) {
+                    p2pServer = null
                 }
             }
         }
@@ -467,8 +477,9 @@ class MainActivity : AppCompatActivity() {
                     if (!isFinishing) {
                         state(
                             "DESCONECTADO",
-                            "La conexión directa se cerró"
+                            "La conexión directa se cerró; intentando restablecerla…"
                         )
+                        requestConnectionInfo()
                     }
                 } else {
                     try {
@@ -504,7 +515,10 @@ class MainActivity : AppCompatActivity() {
                 }
             } catch (_: Exception) {
                 closeP2P()
-                state("DESCONECTADO", "La conexión directa perdió el canal")
+                state("DESCONECTADO", "La conexión directa perdió el canal; intentando restablecerla…")
+                if (!isFinishing) {
+                    requestConnectionInfo()
+                }
             }
         }
     }
