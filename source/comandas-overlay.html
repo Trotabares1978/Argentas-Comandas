@@ -242,7 +242,7 @@ document.querySelectorAll('#argentas-comandas-panel .ac-tabs button').forEach(fu
       "#argentas-native-payment-gate .apg-box{position:relative;width:min(430px,100%);max-height:94vh;overflow:auto;background:#151515;border:2px solid #E8B84A;border-radius:22px;padding:18px;box-shadow:0 20px 80px #000}"+
       ".apg-title{font-size:19px;font-weight:1000;letter-spacing:.08em;color:#E8B84A}.apg-sub{font-size:11px;color:#aaa;margin-top:4px}.apg-total{font-size:30px;font-weight:1000;color:#fff;margin:12px 0}"+
       ".apg-fields{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}.apg-field{background:#090909;border:2px solid #333;border-radius:13px;color:#fff;padding:10px;text-align:left}.apg-field.active{border-color:#E8B84A}.apg-field span{display:block;font-size:9px;font-weight:900;color:#999;letter-spacing:.08em}.apg-field b{display:block;font-size:21px;margin-top:5px;color:#fff}"+
-      ".apg-result{background:#090909;border-radius:13px;padding:12px;text-align:center;font-size:18px;font-weight:1000;color:#E8B84A;margin-bottom:10px}.apg-keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.apg-keypad button{height:52px;border:1px solid #333;border-radius:12px;background:#252525;color:#fff;font-size:20px;font-weight:900}.apg-exact{width:100%;margin-top:9px;height:48px;border:2px solid #E8B84A;border-radius:12px;background:#E8B84A;color:#000;font-weight:1000}.apg-actions{display:grid;grid-template-columns:1fr 1.5fr;gap:8px;margin-top:9px}.apg-cancel,.apg-confirm{height:48px;border-radius:12px;font-weight:1000}.apg-cancel{background:#222;border:1px solid #444;color:#aaa}.apg-confirm{background:#16a34a;border:2px solid #22c55e;color:#fff}";
+      ".apg-result{background:#102719;border-radius:13px;padding:14px;text-align:center;font-size:34px;line-height:1.1;font-weight:1000;color:#35c46a;margin-bottom:10px;min-height:64px;display:flex;align-items:center;justify-content:center}.apg-keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.apg-keypad button{height:52px;border:1px solid #333;border-radius:12px;background:#252525;color:#fff;font-size:20px;font-weight:900}.apg-exact{width:100%;margin-top:9px;height:48px;border:2px solid #E8B84A;border-radius:12px;background:#E8B84A;color:#000;font-weight:1000}.apg-actions{display:grid;grid-template-columns:1fr 1.5fr;gap:8px;margin-top:9px}.apg-cancel,.apg-confirm{height:48px;border-radius:12px;font-weight:1000}.apg-cancel{background:#222;border:1px solid #444;color:#aaa}.apg-confirm{background:#16a34a;border:2px solid #22c55e;color:#fff}";
     document.head.appendChild(style);
 
     modal.querySelector("#apg-cash").onclick=function(){activeField="cash";paint()};
@@ -275,9 +275,9 @@ document.querySelectorAll('#argentas-comandas-panel .ac-tabs button').forEach(fu
     modal.querySelector("#apg-cash").classList.toggle("active",activeField==="cash");
     modal.querySelector("#apg-transfer").classList.toggle("active",activeField==="transfer");
     var received=cashNow+transferNow,diff=received-totalNow,r=modal.querySelector("#apg-result");
-    if(diff>0)r.textContent="RECIBIDO "+money(received)+" • VUELTO "+money(diff);
-    else if(diff<0)r.textContent="RECIBIDO "+money(received)+" • FALTA "+money(-diff)+" • SE PUEDE CERRAR";
-    else r.textContent="PAGO EXACTO • "+money(received);
+    if(diff>0){r.textContent="VUELTO "+money(diff);r.style.color="#35c46a";r.style.background="#102719";}
+    else if(diff<0){r.textContent="FALTA "+money(-diff)+" • SE PUEDE CERRAR";r.style.color="#E8B84A";r.style.background="#090909";}
+    else{r.textContent="PAGO EXACTO";r.style.color="#E8B84A";r.style.background="#090909";}
   }
   function close(result){
     if(modal)modal.remove();
