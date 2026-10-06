@@ -313,6 +313,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        override fun onCharacteristicChanged(gatt: android.bluetooth.BluetoothGatt, characteristic: android.bluetooth.BluetoothGattCharacteristic, value: ByteArray) {
+            receiveBleChunk(value)
+        }
+
+        @Suppress("DEPRECATION")
         override fun onCharacteristicChanged(gatt: android.bluetooth.BluetoothGatt, characteristic: android.bluetooth.BluetoothGattCharacteristic) {
             receiveBleChunk(characteristic.value ?: return)
         }
