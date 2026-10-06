@@ -131,12 +131,37 @@
     for(var i=0;i<localStorage.length;i++){
       var k=localStorage.key(i);
       if(!k)continue;
+      if(k===AUTO_BACKUP_KEY||k===AUTO_BACKUP_DATE_KEY)continue;
       if(PREFIXES.some(function(p){return k.indexOf(p)===0})||EXTRA_KEYS.indexOf(k)>=0){
         try{data[k]=JSON.parse(localStorage.getItem(k));}
         catch(e){data[k]=localStorage.getItem(k);}
       }
     }
     return {format:'argentas-comandas-backup',version:BACKUP_VERSION,createdAt:new Date().toISOString(),data:data};
+  }
+
+  var AUTO_BACKUP_KEY='argentas_auto_backup';
+  var AUTO_BACKUP_DATE_KEY='argentas_auto_backup_date';
+
+  function todayKey(){
+    var d=new Date();
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+
+  function automaticBackup(){
+    try{
+      var today=todayKey();
+      if(localStorage.getItem(AUTO_BACKUP_DATE_KEY)===today)return false;
+      var payload=collect();
+      payload.automatic=true;
+      payload.createdAt=new Date().toISOString();
+      localStorage.setItem(AUTO_BACKUP_KEY,JSON.stringify(payload));
+      localStorage.setItem(AUTO_BACKUP_DATE_KEY,today);
+      return true;
+    }catch(e){
+      console.warn('No se pudo guardar el respaldo automático',e);
+      return false;
+    }
   }
 
   function download(){
@@ -198,7 +223,7 @@
     if(!section||document.getElementById('ac-backup-card'))return;
     var card=document.createElement('div');
     card.id='ac-backup-card';card.className='ac-card';card.style.marginTop='10px';
-    card.innerHTML='<b>Respaldo y recuperación</b><div class="ac-muted" style="margin-top:8px">Guardá una copia de todos los datos locales de Argentas-Comandas para recuperarlos después de reinstalar o cambiar de equipo.</div><div class="ac-actions"><button type="button" class="ac-btn ac-primary" id="ac-backup-export">⬇️ GUARDAR RESPALDO</button><button type="button" class="ac-btn ac-dark" id="ac-backup-import">⬆️ RESTAURAR RESPALDO</button></div><input id="ac-backup-file" type="file" accept=".json,application/json" style="display:none">';
+    card.innerHTML='<b>Respaldo y recuperación</b><div class="ac-muted" style="margin-top:8px">Guardá una copia de todos los datos locales de Argentas-Comandas para recuperarlos después de reinstalar o cambiar de equipo.</div><div class="ac-muted" id="ac-auto-backup-status" style="margin-top:6px">💾 Respaldo automático diario: '+(localStorage.getItem(AUTO_BACKUP_DATE_KEY)||'pendiente')+'</div><div class="ac-actions"><button type="button" class="ac-btn ac-primary" id="ac-backup-export">⬇️ GUARDAR RESPALDO</button><button type="button" class="ac-btn ac-dark" id="ac-backup-import">⬆️ RESTAURAR RESPALDO</button></div><input id="ac-backup-file" type="file" accept=".json,application/json" style="display:none">';
     section.appendChild(card);
     document.getElementById('ac-backup-export').onclick=download;
     document.getElementById('ac-backup-import').onclick=function(){document.getElementById('ac-backup-file').click()};
@@ -208,6 +233,7 @@
   installStorageWatch();
   compactTombstones();
   wrapTransport();
+  automaticBackup();
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',addUi,{once:true});else addUi();
   window.argentasBackup=collect;
   window.argentasRestore=restore;
