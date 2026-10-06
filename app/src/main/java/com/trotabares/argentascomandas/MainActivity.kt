@@ -147,6 +147,30 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val wifiP2pDnsListener = WifiP2pManager.DnsSdServiceResponseListener { instanceName, _, device ->
+        if (instanceName == wifiP2pServiceName) {
+            wifiP2pPeers[device.deviceAddress] = device
+            publishWifiP2pDevices()
+        }
+    }
+
+    private val wifiP2pTxtListener = WifiP2pManager.DnsSdTxtRecordListener { _, _, device ->
+        wifiP2pPeers[device.deviceAddress] = device
+        publishWifiP2pDevices()
+    }
+
+    private val wifiP2pConnectionInfoListener = WifiP2pManager.ConnectionInfoListener { info ->
+        if (!info.groupFormed) return@ConnectionInfoListener
+        wifiP2pWriter.execute {
+            try {
+                if (info.isGroupOwner) startWifiP2pServer()
+                else connectWifiP2pSocket(info.groupOwnerAddress.hostAddress)
+            } catch (e: Exception) {
+                state("DESCONECTADO", "Wi-Fi Direct: ${e.message ?: "no se pudo abrir el canal"}")
+            }
+        }
+    }
+
     private val bleAdvertiseCallback = object : AdvertiseCallback() {
         override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
             state("LISTO", "Argentas está visible para otros Argentas")
