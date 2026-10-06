@@ -181,7 +181,7 @@
   function scheduleAutoBackup(){
     clearTimeout(window.__argentasAutoBackupTimer);
     window.__argentasAutoBackupTimer=setTimeout(function(){
-      if(autoBackupLastChange&&Date.now()-autoBackupLastChange>15000)automaticBackup(true);
+      if(autoBackupLastChange)automaticBackup(true);
     },2000);
   }
 
