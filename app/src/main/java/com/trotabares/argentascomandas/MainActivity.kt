@@ -216,6 +216,7 @@ class MainActivity : AppCompatActivity() {
     private var gattServer: android.bluetooth.BluetoothGattServer? = null
     @Volatile private var gattServiceReady = false
     @Volatile private var gattPeer: BluetoothDevice? = null
+    @Volatile private var serviceDiscoveryAttempt = 0
     private val bleIncoming = StringBuilder()
     private val CHARACTERISTIC_UUID = UUID.fromString("7f8d7b9a-4a3d-4c0e-9b0d-2b0d6c7e9a12")
     private val DESCRIPTOR_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
@@ -229,7 +230,9 @@ class MainActivity : AppCompatActivity() {
             }
             if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
                 state("CONECTANDO", "BLE conectado; buscando canal Argentas…")
-                gatt.discoverServices()
+                serviceDiscoveryAttempt += 1
+                val started = gatt.discoverServices()
+                if (!started) state("DESCONECTADO", "BLE: Android no pudo iniciar el descubrimiento del canal")
             } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
                 try { gatt.close() } catch (_: Exception) {}
                 state("DESCONECTADO", "Conexión BLE finalizada")
@@ -242,6 +245,11 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             val service = gatt.getService(uuid)
+            if (service == null) {
+                val uuids = gatt.services.joinToString(",") { it.uuid.toString() }
+                state("DESCONECTADO", "BLE conectado, pero Argentas no aparece entre los servicios ($uuids)")
+                return
+            }
             val characteristic = service?.getCharacteristic(CHARACTERISTIC_UUID)
             if (characteristic == null) {
                 state("DESCONECTADO", "BLE conectado, pero el servicio Argentas todavía no está disponible")
