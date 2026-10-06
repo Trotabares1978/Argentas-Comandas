@@ -39,6 +39,8 @@ class MainActivity : AppCompatActivity() {
 
     private val wifiPort = 8988
     private val permissionRequest = 4107
+    private val prefs by lazy { getSharedPreferences("argentas_p2p", Context.MODE_PRIVATE) }
+    private val lastPeerKey = "last_peer_address"
 
     private var p2p: WifiP2pManager? = null
     private var p2pChannel: WifiP2pManager.Channel? = null
@@ -241,7 +243,7 @@ class MainActivity : AppCompatActivity() {
     private fun publishP2PDevices() {
         val array = JSONArray()
 
-        p2pDevices.toSortedMap().forEach { (address, name) ->
+        p2pDevices.entries.sortedWith(compareBy({ it.key != prefs.getString(lastPeerKey, null) }, { it.value.lowercase() })).forEach { (address, name) ->
             array.put(
                 JSONObject()
                     .put("name", name)
@@ -272,11 +274,13 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
         }
 
+        prefs.edit().putString(lastPeerKey, address).apply()
         closeP2P()
-        state("CONECTANDO", "Creando enlace directo por Wi-Fi Direct…")
+        state("CONECTANDO", "Conectando directamente con el último dispositivo…")
 
         val config = WifiP2pConfig().apply {
             deviceAddress = address
+            groupOwnerIntent = 7
         }
 
         manager.connect(
@@ -373,7 +377,7 @@ class MainActivity : AppCompatActivity() {
             var connected = false
 
             try {
-                repeat(12) { attempt ->
+                repeat(8) { attempt ->
                     if (p2pConnected) {
                         connected = true
                         return@repeat
@@ -384,15 +388,15 @@ class MainActivity : AppCompatActivity() {
                         socket.tcpNoDelay = true
                         socket.connect(
                             InetSocketAddress(address, wifiPort),
-                            2500
+                            900
                         )
 
                         attachP2PSocket(socket)
                         connected = true
                         return@repeat
                     } catch (_: Exception) {
-                        if (attempt < 11) {
-                            TimeUnit.MILLISECONDS.sleep(500)
+                        if (attempt < 7) {
+                            TimeUnit.MILLISECONDS.sleep(180)
                         }
                     }
                 }
@@ -426,6 +430,8 @@ class MainActivity : AppCompatActivity() {
 
         p2pSocket = socket
         p2pConnected = true
+        // El dispositivo que logró establecer TCP es el peer válido para la próxima conexión.
+        // Esto acelera el descubrimiento posterior sin depender de Internet ni de un router.
 
         state("CONECTADO", "Conectado directamente con otro Argentas")
         js(
