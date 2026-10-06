@@ -87,9 +87,12 @@ class MainActivity : AppCompatActivity() {
         )
 
         if (Build.VERSION.SDK_INT >= 33) {
+            // En Android 13+ Wi-Fi Direct se autoriza con NEARBY_WIFI_DEVICES.
+            // No exigir ubicación evita bloquear la conexión cuando el usuario
+            // no concede un permiso de ubicación que la app no necesita.
             list += Manifest.permission.NEARBY_WIFI_DEVICES
-            list += Manifest.permission.ACCESS_FINE_LOCATION
         } else {
+            // En Android 12 e inferiores Wi-Fi Direct requiere ubicación.
             list += Manifest.permission.ACCESS_COARSE_LOCATION
             list += Manifest.permission.ACCESS_FINE_LOCATION
         }
