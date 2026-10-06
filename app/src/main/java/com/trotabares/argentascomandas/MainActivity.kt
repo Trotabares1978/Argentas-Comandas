@@ -177,7 +177,8 @@ class MainActivity : AppCompatActivity() {
             val permissions = mutableListOf(
                 Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_CONNECT,
-                Manifest.permission.BLUETOOTH_ADVERTISE
+                Manifest.permission.BLUETOOTH_ADVERTISE,
+                Manifest.permission.ACCESS_COARSE_LOCATION
             )
             if (Build.VERSION.SDK_INT >= 32) permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
             val needed = permissions.filter {
