@@ -85,7 +85,7 @@
       var old=readJson(key,null),parsed;
       try{parsed=JSON.parse(value)}catch(e){parsed=value}
       compareRemoved(key,old,parsed);
-      var result=originalSet.call(this,key,value);if(key!=='argentas_auto_backup'&&key!=='argentas_auto_backup_date'&&key.indexOf('argentas_')===0){autoBackupLastChange=Date.now();scheduleAutoBackup()}if(key==='argentas_products_v6'){try{window.dispatchEvent(new Event('argentas-products-sync'))}catch(e){}}return result;
+      var result=originalSet.call(this,key,value);if(WATCH_KEYS.indexOf(key)>=0){autoBackupLastChange=Date.now();scheduleAutoBackup()}if(key==='argentas_products_v6'){try{window.dispatchEvent(new Event('argentas-products-sync'))}catch(e){}}return result;
     };
     var originalRemove=Storage.prototype.removeItem;
     Storage.prototype.removeItem=function(key){
@@ -94,7 +94,7 @@
         if(Array.isArray(old))old.forEach(function(x){rememberDeletion(key,x)});
         else if(key==='argentas_comandas_v2'&&old&&Array.isArray(old.orders))old.orders.forEach(function(x){rememberDeletion(key,x)});
       }
-      var result=originalRemove.call(this,key);if(key!=='argentas_auto_backup'&&key!=='argentas_auto_backup_date'&&key.indexOf('argentas_')===0){autoBackupLastChange=Date.now();scheduleAutoBackup()}if(key==='argentas_products_v6'){try{window.dispatchEvent(new Event('argentas-products-sync'))}catch(e){}}return result;
+      var result=originalRemove.call(this,key);if(WATCH_KEYS.indexOf(key)>=0){autoBackupLastChange=Date.now();scheduleAutoBackup()}if(key==='argentas_products_v6'){try{window.dispatchEvent(new Event('argentas-products-sync'))}catch(e){}}return result;
     };
   }
 
