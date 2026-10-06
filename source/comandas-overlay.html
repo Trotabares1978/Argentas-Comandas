@@ -114,3 +114,29 @@ document.getElementById('ac-refresh').onclick=function(){if(window.ArgentasNativ
 document.querySelectorAll('#argentas-comandas-panel .ac-tabs button').forEach(function(b){b.onclick=function(){document.querySelectorAll('#argentas-comandas-panel .ac-tabs button').forEach(function(x){x.classList.remove('on')});b.classList.add('on');['nueva','lista','ventas','bt'].forEach(function(x){document.getElementById('ac-'+x).style.display=x===b.dataset.acTab?'block':'none'});if(b.dataset.acTab==='bt'&&window.ArgentasNativeBluetooth){window.ArgentasNativeBluetooth.refresh();var m=document.getElementById('ac-btmsg');if(m)m.textContent='Listo. Tocá «Mostrar dispositivos» para buscar equipos cercanos.';}renderAll()}});
 })();
 </script>
+
+<script id="argentas-payment-gate">
+(function(){
+  "use strict";
+  window.argentasPaymentGate=function(mode,total,transferAmount,initialCash,done){
+    try{
+      if(typeof window.argentasCheckoutPayment!=="function"){
+        if(typeof done==="function")done(null);
+        return;
+      }
+      window.argentasCheckoutPayment(
+        Number(total)||0,
+        mode,
+        Number(transferAmount)||0,
+        Number(initialCash)||0
+      ).then(function(result){
+        if(typeof done==="function")done(result);
+      }).catch(function(){
+        if(typeof done==="function")done(null);
+      });
+    }catch(e){
+      if(typeof done==="function")done(null);
+    }
+  };
+})();
+</script>
