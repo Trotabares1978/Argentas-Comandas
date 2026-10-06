@@ -272,7 +272,7 @@ class MainActivity : AppCompatActivity() {
         if (origin == "entrante") {
             pendingIncomingSocket = s
             pendingIncomingToken = token
-            state("SOLICITUD", "Un Argentas quiere conectarse")
+            state("ESPERANDO", "Solicitud de conexión entrante…")
         } else {
             state("CONECTANDO", "Esperando aceptación del otro dispositivo…")
             sendHandshake(s, JSONObject().put("type", "argentas_connect_request").put("name", localDeviceName()).toString())
