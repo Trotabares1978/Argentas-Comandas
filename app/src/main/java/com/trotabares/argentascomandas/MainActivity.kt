@@ -174,12 +174,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun ensurePermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val needed = arrayOf(
+            val permissions = mutableListOf(
                 Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_CONNECT,
-                Manifest.permission.BLUETOOTH_ADVERTISE,
-                Manifest.permission.NEARBY_WIFI_DEVICES
-            ).filter {
+                Manifest.permission.BLUETOOTH_ADVERTISE
+            )
+            if (Build.VERSION.SDK_INT >= 32) permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+            val needed = permissions.filter {
                 ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
             }
             if (needed.isNotEmpty()) ActivityCompat.requestPermissions(this, needed.toTypedArray(), permissionRequest)
@@ -708,6 +709,7 @@ class MainActivity : AppCompatActivity() {
             gattServiceReady = false
             gattPeer = null
             connectedAddress = null
+            nearbyEndpointId = null
             reconnectAttempts = 5
             reconnectScheduled = false
         }
