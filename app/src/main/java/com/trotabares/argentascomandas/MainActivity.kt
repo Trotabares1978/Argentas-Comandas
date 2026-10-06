@@ -219,6 +219,9 @@ class MainActivity : AppCompatActivity() {
     private var gattServer: android.bluetooth.BluetoothGattServer? = null
     @Volatile private var gattServiceReady = false
     @Volatile private var gattPeer: BluetoothDevice? = null
+    @Volatile private var connectedAddress: String? = null
+    @Volatile private var reconnectAttempts = 0
+    @Volatile private var reconnectScheduled = false
     @Volatile private var serviceDiscoveryAttempt = 0
     private val gattDiscoveryExecutor = Executors.newSingleThreadScheduledExecutor()
     private val bleIncoming = StringBuilder()
@@ -233,7 +236,12 @@ class MainActivity : AppCompatActivity() {
         override fun onConnectionStateChange(gatt: android.bluetooth.BluetoothGatt, status: Int, newState: Int) {
             if (status != android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
                 try { gatt.close() } catch (_: Exception) {}
-                state("DESCONECTADO", if (status == 8) "BLE: tiempo de conexión agotado (8). El otro Argentas fue encontrado, pero Android perdió el enlace; reintentá." else "BLE: error de conexión ($status)")
+                synchronized(bleLock) {
+                    if (bleGatt === gatt) { bleGatt = null; bleCharacteristic = null }
+                }
+                val address = try { gatt.device.address } catch (_: Exception) { null }
+                state("DESCONECTADO", if (status == 8) "BLE: tiempo de conexión agotado (8)" else "BLE: error de conexión ($status)")
+                if (address != null && address == connectedAddress) scheduleBleReconnect(address)
                 return
             }
             if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
@@ -243,7 +251,12 @@ class MainActivity : AppCompatActivity() {
                 if (!started) state("DESCONECTADO", "BLE: Android no pudo iniciar el descubrimiento del canal")
             } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
                 try { gatt.close() } catch (_: Exception) {}
+                synchronized(bleLock) {
+                    if (bleGatt === gatt) { bleGatt = null; bleCharacteristic = null }
+                }
+                val address = try { gatt.device.address } catch (_: Exception) { null }
                 state("DESCONECTADO", "Conexión BLE finalizada")
+                if (address != null && address == connectedAddress) scheduleBleReconnect(address)
             }
         }
 
@@ -349,10 +362,12 @@ class MainActivity : AppCompatActivity() {
                     state("CONECTANDO", "El otro Argentas entró al canal BLE…")
                 } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED && gattPeer?.address == device.address) {
                     gattPeer = null
+                    state("DESCONECTADO", "Conexión BLE finalizada")
                 }
             }
             override fun onDescriptorWriteRequest(device: BluetoothDevice, requestId: Int, descriptor: android.bluetooth.BluetoothGattDescriptor, preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
                 if (descriptor.uuid == DESCRIPTOR_UUID && value.contentEquals(android.bluetooth.BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)) {
+                    descriptor.value = value.clone()
                     gattPeer = device
                     state("CONECTADO", "Conectado con Argentas por BLE")
                     js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'authorized'}}));")
@@ -389,8 +404,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("MissingPermission")
+    private fun scheduleBleReconnect(address: String) {
+        if (reconnectScheduled || reconnectAttempts >= 5) return
+        reconnectScheduled = true
+        reconnectAttempts += 1
+        val delay = (reconnectAttempts * 700L).coerceAtMost(3500L)
+        state("CONECTANDO", "BLE se cortó; reconectando automáticamente…")
+        executor.execute {
+            try { Thread.sleep(delay) } catch (_: InterruptedException) { reconnectScheduled = false; return@execute }
+            reconnectScheduled = false
+            if (connectedAddress == address && synchronized(bleLock) { bleGatt == null }) {
+                connect(address)
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
     private fun connect(address: String) {
         if (!canConnect()) { ensurePermissions(); return }
+        connectedAddress = address
+        reconnectAttempts = 0
+        reconnectScheduled = false
         val device = argentasCandidates[address] ?: try { adapter?.getRemoteDevice(address) } catch (_: Exception) { null }
         if (device == null) { state("DESCONECTADO", "No se encontró el dispositivo Argentas"); return }
         stopPresenceScan()
@@ -597,6 +631,9 @@ class MainActivity : AppCompatActivity() {
             gattServer = null
             gattServiceReady = false
             gattPeer = null
+            connectedAddress = null
+            reconnectAttempts = 5
+            reconnectScheduled = false
         }
         synchronized(connectionLock) {
             connectionToken += 1
