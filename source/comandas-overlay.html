@@ -129,7 +129,7 @@ function mergeProductsIntoArgentas(remote){
     var map=new Map(local.map(function(x){return[String(x&&x.id||''),x]})),changed=false;
     remote.forEach(function(x){
       var id=String(x&&x.id||''),old=map.get(id);if(!id)return;
-      if(!old||Number(x.updatedAt||0)>Number(old.updatedAt||0)){map.set(id,old?Object.assign({},old,x):x);changed=true}
+      if(!old||Number(x.updatedAt||0)>Number(old.updatedAt||0)||(Number(x.updatedAt||0)===Number(old.updatedAt||0)&&productSignature(x)>productSignature(old))){map.set(id,old?Object.assign({},old,x):x);changed=true}
     });
     if(changed)localStorage.setItem('argentas_products_v6',JSON.stringify(Array.from(map.values())));
     return changed;
