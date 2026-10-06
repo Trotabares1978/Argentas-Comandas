@@ -54,6 +54,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var p2pConnected = false
     @Volatile private var connectingTcp = false
     @Volatile private var p2pGroupFormed = false
+    @Volatile private var p2pEpoch = 0L
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -277,6 +278,11 @@ class MainActivity : AppCompatActivity() {
         val channel = p2pChannel ?: return
 
         if (address.isBlank()) return
+        if (p2pConnected) return
+        if (p2pGroupFormed) {
+            requestConnectionInfo()
+            return
+        }
 
         try {
             manager.cancelConnect(channel, null)
@@ -393,13 +399,14 @@ class MainActivity : AppCompatActivity() {
         if (p2pConnected || connectingTcp) return
 
         connectingTcp = true
+        val epoch = p2pEpoch
 
         executor.execute {
             var connected = false
             var firstFailureReported = false
 
             try {
-                while (!p2pConnected && p2pGroupFormed && !isFinishing) {
+                while (!p2pConnected && p2pGroupFormed && p2pEpoch == epoch && !isFinishing) {
                     try {
                         val socket = Socket()
                         socket.tcpNoDelay = true
@@ -540,6 +547,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun closeP2P() {
+        p2pEpoch++
         p2pConnected = false
         connectingTcp = false
 
