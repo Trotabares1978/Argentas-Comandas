@@ -161,7 +161,11 @@ class MainActivity : AppCompatActivity() {
                         ) == WifiP2pManager.WIFI_P2P_STATE_ENABLED
 
                         if (enabled) {
-                            state("LISTO", "Wi-Fi Direct está disponible")
+                            if (p2pConnected && p2pSocket?.isConnected == true && p2pSocket?.isClosed == false) {
+                                state("CONECTADO", "Conectado directamente con otro Argentas")
+                            } else {
+                                state("LISTO", "Wi-Fi Direct está disponible")
+                            }
                         } else {
                             closeP2P()
                             state("ERROR", "Activá Wi-Fi para usar la conexión directa")
@@ -332,6 +336,14 @@ class MainActivity : AppCompatActivity() {
             }
 
             p2pGroupFormed = true
+
+            // Si el canal TCP ya está vivo, este callback de Wi-Fi Direct
+            // no debe pisar el estado real de la conexión.
+            if (p2pConnected && p2pSocket?.isConnected == true && p2pSocket?.isClosed == false) {
+                state("CONECTADO", "Conectado directamente con otro Argentas")
+                return@requestConnectionInfo
+            }
+
             state(
                 "CONECTANDO",
                 if (info.isGroupOwner) {
