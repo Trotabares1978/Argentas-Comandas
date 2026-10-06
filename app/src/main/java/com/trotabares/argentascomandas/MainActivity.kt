@@ -40,14 +40,6 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.os.ParcelUuid
-import android.net.wifi.p2p.WifiP2pConfig
-import android.net.wifi.p2p.WifiP2pDevice
-import android.net.wifi.p2p.WifiP2pDnsSdServiceInfo
-import android.net.wifi.p2p.WifiP2pDnsSdServiceRequest
-import android.net.wifi.p2p.WifiP2pManager
-import java.net.InetSocketAddress
-import java.net.ServerSocket
-import java.net.Socket
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.ConnectionInfo
 import com.google.android.gms.nearby.connection.ConnectionLifecycleCallback
@@ -144,30 +136,6 @@ class MainActivity : AppCompatActivity() {
         override fun onEndpointLost(endpointId: String) {
             nearbyEndpoints.remove(endpointId)
             publishNearbyDevices()
-        }
-    }
-
-    private val wifiP2pDnsListener = WifiP2pManager.DnsSdServiceResponseListener { instanceName, _, device ->
-        if (instanceName == wifiP2pServiceName) {
-            wifiP2pPeers[device.deviceAddress] = device
-            publishWifiP2pDevices()
-        }
-    }
-
-    private val wifiP2pTxtListener = WifiP2pManager.DnsSdTxtRecordListener { _, _, device ->
-        wifiP2pPeers[device.deviceAddress] = device
-        publishWifiP2pDevices()
-    }
-
-    private val wifiP2pConnectionInfoListener = WifiP2pManager.ConnectionInfoListener { info ->
-        if (!info.groupFormed) return@ConnectionInfoListener
-        wifiP2pWriter.execute {
-            try {
-                if (info.isGroupOwner) startWifiP2pServer()
-                else connectWifiP2pSocket(info.groupOwnerAddress.hostAddress)
-            } catch (e: Exception) {
-                state("DESCONECTADO", "Wi-Fi Direct: ${e.message ?: "no se pudo abrir el canal"}")
-            }
         }
     }
 
