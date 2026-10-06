@@ -28,6 +28,21 @@
     try{localStorage.setItem(TOMBSTONE_KEY,JSON.stringify(t))}catch(e){}
   }
 
+  function recordVersion(x){
+    return Number(x&&x.updatedAt)
+        ||Number(x&&x.createdAt)
+        ||Number(x&&x.timestamp)
+        ||Date.parse((x&&x.date)||(x&&x.fecha)||'')
+        ||0;
+  }
+
+  function tombstoneWins(ids,item){
+    var id=identity(item),deletedAt=id&&Number(ids[id]||0);
+    if(!deletedAt)return false;
+    var version=recordVersion(item);
+    return !version||deletedAt>=version;
+  }
+
   function rememberDeletion(key,item){
     var id=identity(item);
     if(!id)return;
@@ -86,13 +101,13 @@
       var current=readJson(key,null);
       if(key==='argentas_comandas_v2'){
         if(!current||!Array.isArray(current.orders))return;
-        var filtered=current.orders.filter(function(x){return !ids[identity(x)]});
+        var filtered=current.orders.filter(function(x){return !tombstoneWins(ids,x)});
         if(filtered.length!==current.orders.length){
           current.orders=filtered;
           try{localStorage.setItem(key,JSON.stringify(current));changed=true}catch(e){}
         }
       }else if(Array.isArray(current)){
-        var filtered=current.filter(function(x){return !ids[identity(x)]});
+        var filtered=current.filter(function(x){return !tombstoneWins(ids,x)});
         if(filtered.length!==current.length){
           try{localStorage.setItem(key,JSON.stringify(filtered));changed=true}catch(e){}
         }
