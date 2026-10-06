@@ -52,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var p2pServer: ServerSocket? = null
     @Volatile private var p2pConnected = false
     @Volatile private var connectingTcp = false
+    @Volatile private var p2pGroupFormed = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -308,6 +309,7 @@ class MainActivity : AppCompatActivity() {
 
         manager.requestConnectionInfo(channel) { info: WifiP2pInfo ->
             if (!info.groupFormed) {
+                p2pGroupFormed = false
                 if (p2pConnected) {
                     closeP2P()
                     state("DESCONECTADO", "Conexión Wi-Fi Direct finalizada")
@@ -315,6 +317,7 @@ class MainActivity : AppCompatActivity() {
                 return@requestConnectionInfo
             }
 
+            p2pGroupFormed = true
             state(
                 "CONECTANDO",
                 if (info.isGroupOwner) {
@@ -385,14 +388,10 @@ class MainActivity : AppCompatActivity() {
 
         executor.execute {
             var connected = false
+            var firstFailureReported = false
 
             try {
-                repeat(8) { attempt ->
-                    if (p2pConnected) {
-                        connected = true
-                        return@repeat
-                    }
-
+                while (!p2pConnected && p2pGroupFormed && !isFinishing) {
                     try {
                         val socket = Socket()
                         socket.tcpNoDelay = true
@@ -403,10 +402,19 @@ class MainActivity : AppCompatActivity() {
 
                         attachP2PSocket(socket)
                         connected = true
-                        return@repeat
                     } catch (_: Exception) {
-                        if (attempt < 7) {
-                            TimeUnit.MILLISECONDS.sleep(180)
+                        if (!firstFailureReported && !isFinishing) {
+                            firstFailureReported = true
+                            state(
+                                "CONECTANDO",
+                                "Wi-Fi Direct está activo; esperando el canal de Argentas…"
+                            )
+                        }
+                        try {
+                            TimeUnit.MILLISECONDS.sleep(1000)
+                        } catch (_: InterruptedException) {
+                            Thread.currentThread().interrupt()
+                            break
                         }
                     }
                 }
@@ -415,10 +423,10 @@ class MainActivity : AppCompatActivity() {
                 connectingTcp = false
             }
 
-            if (!connected && !p2pConnected && !isFinishing) {
+            if (!connected && !p2pConnected && !isFinishing && !p2pGroupFormed) {
                 state(
                     "DESCONECTADO",
-                    "Wi-Fi Direct creó el enlace, pero no se pudo abrir el canal de Argentas"
+                    "La conexión Wi-Fi Direct finalizó"
                 )
             }
         }
