@@ -14,8 +14,6 @@ import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -38,7 +36,6 @@ class MainActivity : AppCompatActivity() {
 
     private val executor = Executors.newCachedThreadPool()
     private val writerExecutor = Executors.newSingleThreadExecutor()
-    private val reconnectHandler = Handler(Looper.getMainLooper())
 
     private val wifiPort = 8988
     private val permissionRequest = 4107
@@ -55,8 +52,6 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var p2pServer: ServerSocket? = null
     @Volatile private var p2pConnected = false
     @Volatile private var connectingTcp = false
-    @Volatile private var reconnectScheduled = false
-    @Volatile private var autoReconnectPending = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -210,15 +205,6 @@ class MainActivity : AppCompatActivity() {
                 }
 
             publishP2PDevices()
-
-            if (autoReconnectPending && !p2pConnected) {
-                val last = prefs.getString(lastPeerKey, null)
-                val device = peers.deviceList.firstOrNull { it.deviceAddress == last }
-                if (device != null) {
-                    autoReconnectPending = false
-                    connectP2P(device.deviceAddress)
-                }
-            }
         }
     }
 
@@ -324,11 +310,7 @@ class MainActivity : AppCompatActivity() {
             if (!info.groupFormed) {
                 if (p2pConnected) {
                     closeP2P()
-                }
-                if (!isFinishing && prefs.getString(lastPeerKey, null) != null) {
-                    autoReconnectPending = true
-                    state("DESCONECTADO", "Conexión Wi-Fi Direct finalizada. Buscando nuevamente al dispositivo…")
-                    startP2PDiscovery()
+                    state("DESCONECTADO", "Conexión Wi-Fi Direct finalizada")
                 }
                 return@requestConnectionInfo
             }
@@ -356,32 +338,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startP2PServer() {
-        if (p2pServer != null) return
+        if (p2pServer != null || p2pConnected) return
 
         executor.execute {
             try {
                 val server = ServerSocket(wifiPort)
                 p2pServer = server
-                state("CONECTANDO", "Canal permanente listo. Esperando al otro Argentas…")
 
-                while (!isFinishing && p2pServer === server) {
-                    try {
-                        val socket = server.accept()
-                        if (p2pConnected) {
-                            try { socket.close() } catch (_: Exception) {}
-                        } else {
-                            attachP2PSocket(socket)
-                        }
-                    } catch (_: Exception) {
-                        break
-                    }
+                state("CONECTANDO", "Esperando al otro Argentas…")
+
+                val socket = server.accept()
+
+                try {
+                    server.close()
+                } catch (_: Exception) {
                 }
+                p2pServer = null
+
+                attachP2PSocket(socket)
             } catch (_: Exception) {
-                if (!isFinishing && p2pServer == null) {
-                    scheduleReconnect()
+                p2pServer = null
+                if (!isFinishing && !p2pConnected) {
+                    state(
+                        "DESCONECTADO",
+                        "No se pudo abrir el canal local de datos"
+                    )
                 }
-            } finally {
-                if (p2pServer === server) p2pServer = null
             }
         }
     }
@@ -390,13 +372,12 @@ class MainActivity : AppCompatActivity() {
         if (p2pConnected || connectingTcp) return
 
         connectingTcp = true
-        reconnectScheduled = false
 
         executor.execute {
             var connected = false
 
             try {
-                repeat(12) { attempt ->
+                repeat(8) { attempt ->
                     if (p2pConnected) {
                         connected = true
                         return@repeat
@@ -405,18 +386,17 @@ class MainActivity : AppCompatActivity() {
                     try {
                         val socket = Socket()
                         socket.tcpNoDelay = true
-                        socket.keepAlive = true
                         socket.connect(
                             InetSocketAddress(address, wifiPort),
-                            1200
+                            900
                         )
 
                         attachP2PSocket(socket)
                         connected = true
                         return@repeat
                     } catch (_: Exception) {
-                        if (attempt < 11) {
-                            TimeUnit.MILLISECONDS.sleep(250)
+                        if (attempt < 7) {
+                            TimeUnit.MILLISECONDS.sleep(180)
                         }
                     }
                 }
@@ -428,24 +408,10 @@ class MainActivity : AppCompatActivity() {
             if (!connected && !p2pConnected && !isFinishing) {
                 state(
                     "DESCONECTADO",
-                    "Reintentando automáticamente la conexión directa…"
+                    "Wi-Fi Direct creó el enlace, pero no se pudo abrir el canal de Argentas"
                 )
-                scheduleReconnect()
             }
         }
-    }
-
-    private fun scheduleReconnect(delayMs: Long = 1800L) {
-        if (isFinishing || reconnectScheduled || p2pConnected) return
-        if (prefs.getString(lastPeerKey, null).isNullOrBlank()) return
-
-        reconnectScheduled = true
-        autoReconnectPending = true
-        reconnectHandler.postDelayed({
-            reconnectScheduled = false
-            if (isFinishing || p2pConnected) return@postDelayed
-            requestConnectionInfo()
-        }, delayMs)
     }
 
     private fun attachP2PSocket(socket: Socket) {
@@ -501,9 +467,8 @@ class MainActivity : AppCompatActivity() {
                     if (!isFinishing) {
                         state(
                             "DESCONECTADO",
-                            "La conexión directa se cerró. Reintentando automáticamente…"
+                            "La conexión directa se cerró"
                         )
-                        scheduleReconnect()
                     }
                 } else {
                     try {
@@ -539,8 +504,7 @@ class MainActivity : AppCompatActivity() {
                 }
             } catch (_: Exception) {
                 closeP2P()
-                state("DESCONECTADO", "La conexión directa perdió el canal. Reintentando automáticamente…")
-                scheduleReconnect()
+                state("DESCONECTADO", "La conexión directa perdió el canal")
             }
         }
     }
@@ -663,7 +627,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        reconnectHandler.removeCallbacksAndMessages(null)
         closeP2P()
 
         try {
