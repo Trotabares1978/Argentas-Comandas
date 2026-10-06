@@ -39,6 +39,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private val executor = Executors.newCachedThreadPool()
     private val writerExecutor = Executors.newSingleThreadExecutor()
+    private val timeoutExecutor = Executors.newScheduledThreadPool(1)
     private val connectionLock = Any()
     @Volatile private var connectionToken = 0L
     @Volatile private var output: OutputStream? = null
@@ -241,7 +242,7 @@ class MainActivity : AppCompatActivity() {
                 state("CONECTANDO", label)
                 s = device.createInsecureRfcommSocketToServiceRecord(uuid)
                 val socketRef = s!!
-                timeout = writerExecutor.schedule({
+                timeout = timeoutExecutor.schedule({
                     try { socketRef.close() } catch (_: Exception) {}
                 }, 12, TimeUnit.SECONDS)
                 socketRef.connect()
@@ -374,6 +375,7 @@ class MainActivity : AppCompatActivity() {
         try { bleAdvertiser?.stopAdvertising(bleAdvertiseCallback) } catch (_: Exception) {}
         executor.shutdownNow()
         writerExecutor.shutdownNow()
+        timeoutExecutor.shutdownNow()
         webView.removeJavascriptInterface("ArgentasNativeBluetooth")
         super.onDestroy()
     }
