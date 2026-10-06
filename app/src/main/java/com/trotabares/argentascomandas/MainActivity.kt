@@ -20,6 +20,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -67,6 +68,10 @@ class MainActivity : AppCompatActivity() {
         webView.addJavascriptInterface(NativeBluetoothBridge(), "ArgentasNativeBluetooth")
 
         setContentView(webView)
+        ContextCompat.startForegroundService(
+            this,
+            Intent(this, ArgentasConnectionService::class.java)
+        )
         webView.loadUrl("file:///android_asset/index.html")
 
         ensurePermissions()
