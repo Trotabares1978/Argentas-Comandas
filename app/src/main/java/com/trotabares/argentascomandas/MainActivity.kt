@@ -12,6 +12,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.IntentFilter
 import android.net.wifi.p2p.*
+import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceInfo
+import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceRequest
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.InetAddress
@@ -212,7 +214,7 @@ class MainActivity : AppCompatActivity() {
                     publishP2PDevices()
                 }
             },
-            { _, _, _, _ -> }
+            { _, _, _ -> }
         )
 
         manager.clearServiceRequests(channel, null)
