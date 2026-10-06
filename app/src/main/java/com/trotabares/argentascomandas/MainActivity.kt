@@ -218,7 +218,7 @@ class MainActivity : AppCompatActivity() {
         executor.execute {
             try {
                 closeConnection()
-                server = a.listenUsingInsecureRfcommWithServiceRecord("Argentas-Comandas", uuid)
+                server = a.listenUsingRfcommWithServiceRecord("Argentas-Comandas", uuid)
                 state("ESPERANDO", "Esperando al otro teléfono…")
                 val accepted = server!!.accept()
                 try { server?.close() } catch (_: Exception) {}
@@ -242,7 +242,7 @@ class MainActivity : AppCompatActivity() {
                 val device = argentasCandidates[address] ?: a.getRemoteDevice(address)
                 val label = try { device.name ?: address } catch (_: SecurityException) { address }
                 state("CONECTANDO", label)
-                s = device.createInsecureRfcommSocketToServiceRecord(uuid)
+                s = device.createRfcommSocketToServiceRecord(uuid)
                 val socketRef = s!!
                 timeout = timeoutExecutor.schedule({
                     try { socketRef.close() } catch (_: Exception) {}
