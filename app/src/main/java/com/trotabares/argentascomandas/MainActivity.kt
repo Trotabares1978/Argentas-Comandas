@@ -40,6 +40,14 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.os.ParcelUuid
+import android.net.wifi.p2p.WifiP2pConfig
+import android.net.wifi.p2p.WifiP2pDevice
+import android.net.wifi.p2p.WifiP2pDnsSdServiceInfo
+import android.net.wifi.p2p.WifiP2pDnsSdServiceRequest
+import android.net.wifi.p2p.WifiP2pManager
+import java.net.InetSocketAddress
+import java.net.ServerSocket
+import java.net.Socket
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.ConnectionInfo
 import com.google.android.gms.nearby.connection.ConnectionLifecycleCallback
