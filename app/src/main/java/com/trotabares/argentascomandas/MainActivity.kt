@@ -32,6 +32,8 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.os.ParcelUuid
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
@@ -213,7 +215,7 @@ class MainActivity : AppCompatActivity() {
         executor.execute {
             try {
                 closeConnection()
-                server = a.listenUsingRfcommWithServiceRecord("Argentas-Comandas", uuid)
+                server = a.listenUsingInsecureRfcommWithServiceRecord("Argentas-Comandas", uuid)
                 state("ESPERANDO", "Esperando al otro teléfono…")
                 val accepted = server!!.accept()
                 try { server?.close() } catch (_: Exception) {}
@@ -229,20 +231,29 @@ class MainActivity : AppCompatActivity() {
         if (!canConnect()) { ensurePermissions(); return }
         val a = adapter ?: return
         executor.execute {
+            var s: BluetoothSocket? = null
+            var timeout: ScheduledFuture<*>? = null
             try {
                 closeConnection()
                 a.cancelDiscovery()
                 val device = argentasCandidates[address] ?: a.getRemoteDevice(address)
-                state("CONECTANDO", device.name ?: address)
-                val s = device.createRfcommSocketToServiceRecord(uuid)
-                try {
-                    s.connect()
-                    establish(s, "saliente")
-                } catch (e: IOException) {
-                    try { s.close() } catch (_: Exception) {}
-                    throw e
-                }
+                val label = try { device.name ?: address } catch (_: SecurityException) { address }
+                state("CONECTANDO", label)
+                s = device.createInsecureRfcommSocketToServiceRecord(uuid)
+                val socketRef = s!!
+                timeout = writerExecutor.schedule({
+                    try { socketRef.close() } catch (_: Exception) {}
+                }, 12, TimeUnit.SECONDS)
+                socketRef.connect()
+                timeout?.cancel(false)
+                establish(socketRef, "saliente")
             } catch (e: IOException) {
+                timeout?.cancel(false)
+                try { s?.close() } catch (_: Exception) {}
+                state("DESCONECTADO", "No se pudo conectar con Argentas. Verificá que el otro teléfono siga abierto e intentá nuevamente.")
+            } catch (e: Exception) {
+                timeout?.cancel(false)
+                try { s?.close() } catch (_: Exception) {}
                 state("DESCONECTADO", e.message ?: "Falló la conexión")
             }
         }
