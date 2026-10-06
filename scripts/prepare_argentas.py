@@ -6,9 +6,10 @@ if not parts: raise SystemExit("No se encontraron partes de Argentas original")
 html="".join(p.read_text(encoding="utf-8") for p in parts)
 bridge=(source/"bluetooth-bridge.html").read_text(encoding="utf-8")
 overlay=(source/"comandas-overlay.html").read_text(encoding="utf-8")
+backup=(source/"backup-recovery.js").read_text(encoding="utf-8")
 marker="</body>"
 if marker not in html: raise SystemExit("Argentas original no contiene </body>")
-html=html.replace(marker,bridge+"\n"+overlay+"\n"+marker,1)
+html=html.replace(marker,bridge+"\n"+overlay+"\n<script>"+backup+"<\/script>\n"+marker,1)
 # En móvil dejamos la navegación inferior original (incluye CONEXIÓN) y la hacemos
 # verdaderamente desplazable con el dedo mediante CSS del overlay. En escritorio
 # mantenemos la barra superior original.
