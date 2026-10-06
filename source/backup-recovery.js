@@ -28,6 +28,12 @@
     try{localStorage.setItem(TOMBSTONE_KEY,JSON.stringify(t))}catch(e){}
   }
 
+  function compactTombstones(){
+    var t=tombstones(),cut=Date.now()-1000*60*60*24*30,changed=false;
+    Object.keys(t).forEach(function(key){var ids=t[key];if(!ids||typeof ids!=='object')return;Object.keys(ids).forEach(function(id){if(Number(ids[id]||0)<cut){delete ids[id];changed=true}});if(!Object.keys(ids).length){delete t[key];changed=true}});
+    if(changed)saveTombstones(t);
+  }
+
   function recordVersion(x){
     return Number(x&&x.updatedAt)
         ||Number(x&&x.createdAt)
@@ -200,6 +206,7 @@
   }
 
   installStorageWatch();
+  compactTombstones();
   wrapTransport();
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',addUi,{once:true});else addUi();
   window.argentasBackup=collect;
