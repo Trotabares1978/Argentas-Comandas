@@ -179,7 +179,12 @@ class MainActivity : AppCompatActivity() {
         executor.execute {
             try { Thread.sleep(8000) } catch (_: InterruptedException) { return@execute }
             try { scanner.stopScan(bleScanCallback) } catch (_: Exception) {}
-            state("LISTO", if (discovered.isEmpty()) "No hay otros Argentas abiertos en este momento." else "Búsqueda finalizada")
+            val connected = synchronized(bleLock) {
+                bleGatt != null && bleCharacteristic != null
+            } || gattPeer != null
+            if (!connected) {
+                state("LISTO", if (discovered.isEmpty()) "No hay otros Argentas abiertos en este momento." else "Búsqueda finalizada")
+            }
         }
     }
 
