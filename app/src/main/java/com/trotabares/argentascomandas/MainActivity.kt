@@ -33,6 +33,7 @@ import android.bluetooth.le.ScanSettings
 import android.os.ParcelUuid
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.lang.reflect.Method
 
@@ -221,6 +222,9 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var serviceDiscoveryAttempt = 0
     private val gattDiscoveryExecutor = Executors.newSingleThreadScheduledExecutor()
     private val bleIncoming = StringBuilder()
+    @Volatile private var pendingWriteLatch: CountDownLatch? = null
+    @Volatile private var pendingWriteStatus = -1
+    @Volatile private var pendingWriteGatt: android.bluetooth.BluetoothGatt? = null
     private val CHARACTERISTIC_UUID = UUID.fromString("7f8d7b9a-4a3d-4c0e-9b0d-2b0d6c7e9a12")
     private val DESCRIPTOR_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
@@ -299,7 +303,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onCharacteristicWrite(gatt: android.bluetooth.BluetoothGatt, characteristic: android.bluetooth.BluetoothGattCharacteristic, status: Int) {
-            if (status != android.bluetooth.BluetoothGatt.GATT_SUCCESS) state("DESCONECTADO", "BLE: no se pudo enviar el mensaje")
+            if (pendingWriteGatt === gatt) {
+                pendingWriteStatus = status
+                pendingWriteLatch?.countDown()
+            }
+            if (status != android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
+                state("DESCONECTADO", "BLE: no se pudo enviar un bloque Bluetooth ($status)")
+            }
         }
 
         override fun onCharacteristicChanged(gatt: android.bluetooth.BluetoothGatt, characteristic: android.bluetooth.BluetoothGattCharacteristic) {
@@ -432,34 +442,68 @@ class MainActivity : AppCompatActivity() {
     private fun sendBle(message: String) {
         val gatt = synchronized(bleLock) { bleGatt }
         val characteristic = synchronized(bleLock) { bleCharacteristic }
-        if (gatt == null || characteristic == null) { state("DESCONECTADO", "No hay conexión BLE activa"); return }
+        if (gatt == null || characteristic == null) {
+            state("DESCONECTADO", "No hay conexión BLE activa")
+            return
+        }
         val payload = (message.replace("\r", "").replace("\n", "") + "\n").toByteArray(Charsets.UTF_8)
+
         writerExecutor.execute {
             var offset = 0
             while (offset < payload.size) {
                 val end = minOf(offset + 20, payload.size)
                 val chunk = payload.copyOfRange(offset, end)
-                var started = false
-                repeat(8) {
-                    val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    gatt.writeCharacteristic(characteristic, chunk, android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
-                } else {
-                    characteristic.writeType = android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-                    characteristic.value = chunk
-                    if (gatt.writeCharacteristic(characteristic)) 0 else -1
+                var delivered = false
+
+                repeat(3) {
+                    val latch = CountDownLatch(1)
+                    pendingWriteStatus = -1
+                    pendingWriteGatt = gatt
+                    pendingWriteLatch = latch
+
+                    val started = try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            gatt.writeCharacteristic(
+                                characteristic,
+                                chunk,
+                                android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                            ) == 0
+                        } else {
+                            @Suppress("DEPRECATION")
+                            characteristic.writeType = android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                            @Suppress("DEPRECATION")
+                            characteristic.value = chunk
+                            @Suppress("DEPRECATION")
+                            gatt.writeCharacteristic(characteristic)
+                        }
+                    } catch (_: Exception) {
+                        false
+                    }
+
+                    if (started) {
+                        try { latch.await(3, TimeUnit.SECONDS) } catch (_: InterruptedException) {
+                            pendingWriteLatch = null
+                            pendingWriteGatt = null
+                            return@execute
+                        }
+                        if (pendingWriteStatus == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
+                            delivered = true
+                            pendingWriteLatch = null
+                            pendingWriteGatt = null
+                            return@repeat
+                        }
+                    }
+
+                    pendingWriteLatch = null
+                    pendingWriteGatt = null
+                    try { Thread.sleep(120) } catch (_: InterruptedException) { return@execute }
                 }
-                if (result == 0) {
-                    started = true
-                    return@repeat
-                }
-                    try { Thread.sleep(80) } catch (_: InterruptedException) { return@execute }
-                }
-                if (!started) {
-                    state("DESCONECTADO", "BLE: el canal está ocupado o no acepta el envío")
+
+                if (!delivered) {
+                    state("DESCONECTADO", "BLE: el canal no confirmó un bloque; envío detenido para no perder datos")
                     return@execute
                 }
                 offset = end
-                try { Thread.sleep(55) } catch (_: InterruptedException) { return@execute }
             }
         }
     }
