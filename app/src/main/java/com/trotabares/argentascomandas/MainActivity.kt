@@ -211,149 +211,160 @@ class MainActivity : AppCompatActivity() {
         startPresenceScan()
     }
 
-    private fun startServer() {
-        if (!canConnect()) { ensurePermissions(); return }
-        val a = adapter ?: return
-        if (!a.isEnabled) { state("APAGADO", "Activá Bluetooth"); return }
-        executor.execute {
-            try {
-                closeConnection()
-                server = a.listenUsingRfcommWithServiceRecord("Argentas-Comandas", uuid)
-                state("ESPERANDO", "Esperando al otro teléfono…")
-                val accepted = server!!.accept()
-                try { server?.close() } catch (_: Exception) {}
-                server = null
-                establish(accepted, "entrante")
-            } catch (e: IOException) {
-                state("ERROR", e.message ?: "No se pudo esperar")
+    private val bleLock = Any()
+    private var bleGatt: android.bluetooth.BluetoothGatt? = null
+    private var bleCharacteristic: android.bluetooth.BluetoothGattCharacteristic? = null
+    private var gattServer: android.bluetooth.BluetoothGattServer? = null
+    private val bleIncoming = StringBuilder()
+    private val CHARACTERISTIC_UUID = UUID.fromString("7f8d7b9a-4a3d-4c0e-9b0d-2b0d6c7e9a12")
+    private val DESCRIPTOR_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
+    private val bleGattCallback = object : android.bluetooth.BluetoothGattCallback() {
+        override fun onConnectionStateChange(gatt: android.bluetooth.BluetoothGatt, status: Int, newState: Int) {
+            if (status != android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
+                try { gatt.close() } catch (_: Exception) {}
+                state("DESCONECTADO", "BLE: error de conexión ($status)")
+                return
             }
+            if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
+                state("CONECTANDO", "BLE conectado; buscando canal Argentas…")
+                gatt.discoverServices()
+            } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
+                try { gatt.close() } catch (_: Exception) {}
+                state("DESCONECTADO", "Conexión BLE finalizada")
+            }
+        }
+
+        override fun onServicesDiscovered(gatt: android.bluetooth.BluetoothGatt, status: Int) {
+            if (status != android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
+                state("DESCONECTADO", "BLE: no se pudieron descubrir los servicios")
+                return
+            }
+            val service = gatt.getService(uuid)
+            val characteristic = service?.getCharacteristic(CHARACTERISTIC_UUID)
+            if (characteristic == null) {
+                state("DESCONECTADO", "BLE: Argentas no expuso el canal esperado")
+                return
+            }
+            if (!gatt.setCharacteristicNotification(characteristic, true)) {
+                state("DESCONECTADO", "BLE: no se pudieron activar las notificaciones")
+                return
+            }
+            val descriptor = characteristic.getDescriptor(DESCRIPTOR_UUID)
+            if (descriptor != null) {
+                descriptor.value = android.bluetooth.BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                @Suppress("DEPRECATION")
+                gatt.writeDescriptor(descriptor)
+            } else {
+                synchronized(bleLock) { bleGatt = gatt; bleCharacteristic = characteristic }
+                state("CONECTADO", "Conectado con Argentas por BLE")
+                js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'authorized'}}));")
+            }
+        }
+
+        override fun onDescriptorWrite(gatt: android.bluetooth.BluetoothGatt, descriptor: android.bluetooth.BluetoothGattDescriptor, status: Int) {
+            if (descriptor.uuid == DESCRIPTOR_UUID && status == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
+                val characteristic = gatt.getService(uuid)?.getCharacteristic(CHARACTERISTIC_UUID)
+                synchronized(bleLock) { bleGatt = gatt; bleCharacteristic = characteristic }
+                state("CONECTADO", "Conectado con Argentas por BLE")
+                js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'authorized'}}));")
+            } else if (status != android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
+                state("DESCONECTADO", "BLE: no se pudieron activar las notificaciones")
+            }
+        }
+
+        override fun onCharacteristicWrite(gatt: android.bluetooth.BluetoothGatt, characteristic: android.bluetooth.BluetoothGattCharacteristic, status: Int) {
+            if (status != android.bluetooth.BluetoothGatt.GATT_SUCCESS) state("DESCONECTADO", "BLE: no se pudo enviar el mensaje")
+        }
+
+        override fun onCharacteristicChanged(gatt: android.bluetooth.BluetoothGatt, characteristic: android.bluetooth.BluetoothGattCharacteristic) {
+            receiveBleChunk(characteristic.value ?: return)
         }
     }
 
+    private fun startServer() {
+        if (!canConnect() || !canAdvertise()) { ensurePermissions(); return }
+        startGattServer()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startGattServer() {
+        if (gattServer != null) return
+        val manager = getSystemService(BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager
+        val opened = manager.openGattServer(this, object : android.bluetooth.BluetoothGattServerCallback() {
+            override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
+                if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) state("ESPERANDO", "Argentas disponible para conexión BLE…")
+            }
+            override fun onDescriptorWriteRequest(device: BluetoothDevice, requestId: Int, descriptor: android.bluetooth.BluetoothGattDescriptor, preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
+                if (responseNeeded) gattServer?.sendResponse(device, requestId, android.bluetooth.BluetoothGatt.GATT_SUCCESS, offset, ByteArray(0))
+            }
+            override fun onCharacteristicWriteRequest(device: BluetoothDevice, requestId: Int, characteristic: android.bluetooth.BluetoothGattCharacteristic, preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
+                if (characteristic.uuid != CHARACTERISTIC_UUID) {
+                    if (responseNeeded) gattServer?.sendResponse(device, requestId, android.bluetooth.BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, offset, null)
+                    return
+                }
+                receiveBleChunk(value)
+                if (responseNeeded) gattServer?.sendResponse(device, requestId, android.bluetooth.BluetoothGatt.GATT_SUCCESS, offset, ByteArray(0))
+            }
+        }) ?: run {
+            state("ERROR", "No se pudo iniciar el servidor BLE de Argentas")
+            return
+        }
+        val service = android.bluetooth.BluetoothGattService(uuid, android.bluetooth.BluetoothGattService.SERVICE_TYPE_PRIMARY)
+        val characteristic = android.bluetooth.BluetoothGattCharacteristic(
+            CHARACTERISTIC_UUID,
+            android.bluetooth.BluetoothGattCharacteristic.PROPERTY_READ or android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE or android.bluetooth.BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+            android.bluetooth.BluetoothGattCharacteristic.PERMISSION_READ or android.bluetooth.BluetoothGattCharacteristic.PERMISSION_WRITE
+        )
+        characteristic.addDescriptor(android.bluetooth.BluetoothGattDescriptor(DESCRIPTOR_UUID, android.bluetooth.BluetoothGattDescriptor.PERMISSION_READ or android.bluetooth.BluetoothGattDescriptor.PERMISSION_WRITE))
+        service.addCharacteristic(characteristic)
+        if (!opened.addService(service)) { opened.close(); state("ERROR", "No se pudo publicar el canal BLE de Argentas"); return }
+        gattServer = opened
+        state("ESPERANDO", "Argentas listo para conexión BLE")
+    }
+
+    @SuppressLint("MissingPermission")
     private fun connect(address: String) {
         if (!canConnect()) { ensurePermissions(); return }
-        val a = adapter ?: return
-        executor.execute {
-            var s: BluetoothSocket? = null
-            var timeout: ScheduledFuture<*>? = null
-            try {
-                closeConnection()
-                a.cancelDiscovery()
-                val device = argentasCandidates[address] ?: a.getRemoteDevice(address)
-                val label = try { device.name ?: address } catch (_: SecurityException) { address }
-                state("CONECTANDO", label)
-                s = device.createRfcommSocketToServiceRecord(uuid)
-                val socketRef = s!!
-                timeout = timeoutExecutor.schedule({
-                    try { socketRef.close() } catch (_: Exception) {}
-                }, 12, TimeUnit.SECONDS)
-                try {
-                    socketRef.connect()
-                } catch (first: IOException) {
-                    try { socketRef.close() } catch (_: Exception) {}
-                    s = device.createInsecureRfcommSocketToServiceRecord(uuid)
-                    val fallback = s!!
-                    try {
-                        fallback.connect()
-                    } catch (second: IOException) {
-                        try { fallback.close() } catch (_: Exception) {}
-                        throw IOException("RFCOMM no pudo establecerse (seguro: " + first.message + "; alternativo: " + second.message + ")")
-                    }
-                    timeout?.cancel(false)
-                    establish(fallback, "saliente")
-                    return@execute
-                }
-                timeout?.cancel(false)
-                establish(socketRef, "saliente")
-            } catch (e: IOException) {
-                timeout?.cancel(false)
-                try { s?.close() } catch (_: Exception) {}
-                state("DESCONECTADO", "No se pudo conectar con Argentas. Verificá que el otro teléfono siga abierto e intentá nuevamente.")
-            } catch (e: Exception) {
-                timeout?.cancel(false)
-                try { s?.close() } catch (_: Exception) {}
-                state("DESCONECTADO", e.message ?: "Falló la conexión")
+        val device = try { adapter?.getRemoteDevice(address) } catch (_: Exception) { null }
+        if (device == null) { state("DESCONECTADO", "No se encontró el dispositivo Argentas"); return }
+        synchronized(bleLock) {
+            try { bleGatt?.close() } catch (_: Exception) {}
+            bleGatt = null; bleCharacteristic = null; bleIncoming.setLength(0)
+        }
+        state("CONECTANDO", "Conectando directamente con Argentas…")
+        bleGatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) device.connectGatt(this, false, bleGattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE)
+        else device.connectGatt(this, false, bleGattCallback)
+    }
+
+    private fun receiveBleChunk(bytes: ByteArray) {
+        synchronized(bleLock) {
+            bleIncoming.append(String(bytes, Charsets.UTF_8))
+            while (true) {
+                val end = bleIncoming.indexOf("\n")
+                if (end < 0) break
+                val message = bleIncoming.substring(0, end).trimEnd('\r')
+                bleIncoming.delete(0, end + 1)
+                if (message.isNotEmpty()) js("window.onBluetoothMessage&&window.onBluetoothMessage(" + JSONObject.quote(message) + ");")
             }
+            if (bleIncoming.length > 1024 * 1024) bleIncoming.setLength(0)
         }
     }
 
-    private fun establish(s: BluetoothSocket, origin: String) {
-        val token = synchronized(connectionLock) {
-            connectionToken += 1
-            socket = s
-            output = s.outputStream
-            connectionToken
-        }
-        if (origin == "entrante") {
-            pendingIncomingSocket = s
-            pendingIncomingToken = token
-            state("ESPERANDO", "Solicitud de conexión entrante…")
-        } else {
-            state("CONECTANDO", "Esperando aceptación del otro dispositivo…")
-            sendHandshake(s, JSONObject().put("type", "argentas_connect_request").put("name", localDeviceName()).toString())
-        }
+    @SuppressLint("MissingPermission")
+    private fun sendBle(message: String) {
+        val gatt = synchronized(bleLock) { bleGatt }
+        val characteristic = synchronized(bleLock) { bleCharacteristic }
+        if (gatt == null || characteristic == null) { state("DESCONECTADO", "No hay conexión BLE activa"); return }
+        val payload = (message.replace("\r", "").replace("\n", "") + "\n").toByteArray(Charsets.UTF_8)
         executor.execute {
-            try {
-                val input = s.inputStream
-                val buffer = ByteArray(4096)
-                val pending = StringBuilder()
-                while (true) {
-                    val n = input.read(buffer)
-                    if (n < 0) throw IOException("Conexión cerrada")
-                    if (n == 0) continue
-                    pending.append(String(buffer, 0, n, Charsets.UTF_8))
-                    while (true) {
-                        val end = pending.indexOf("\n")
-                        if (end < 0) break
-                        val message = pending.substring(0, end).trimEnd('\r')
-                        pending.delete(0, end + 1)
-                        if (message.isEmpty()) continue
-                        try {
-                            val obj = JSONObject(message)
-                            when (obj.optString("type")) {
-                                "argentas_connect_request" -> {
-                                    val name = obj.optString("name", "Argentas")
-                                    pendingIncomingSocket = s
-                                    pendingIncomingToken = token
-                                    state("SOLICITUD", name)
-                                }
-                                "argentas_connect_accept" -> {
-                                    val current = synchronized(connectionLock) { connectionToken == token && socket === s }
-                                    if (current) {
-                                        pendingIncomingSocket = null
-                                        state("CONECTADO", "Conectado con Argentas")
-                                        js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'authorized'}}));")
-                                    }
-                                }
-                                "argentas_connect_reject" -> {
-                                    state("DESCONECTADO", "La conexión fue rechazada por el otro dispositivo.")
-                                    closeSpecificConnection(s, token)
-                                }
-                                else -> {
-                                    val authorized = synchronized(connectionLock) { connectionToken == token && socket === s && pendingIncomingSocket !== s }
-                                    if (authorized) {
-                                        js("window.onBluetoothMessage&&window.onBluetoothMessage(" + JSONObject.quote(message) + ");")
-                                    }
-                                }
-                            }
-                        } catch (_: Exception) {
-                            val authorized = synchronized(connectionLock) { connectionToken == token && socket === s && pendingIncomingSocket !== s }
-                            if (authorized) {
-                                js("window.onBluetoothMessage&&window.onBluetoothMessage(" + JSONObject.quote(message) + ");")
-                            }
-                        }
-                    }
-                    if (pending.length > 1024 * 1024) {
-                        pending.setLength(0)
-                        state("ERROR", "Mensaje Bluetooth demasiado grande")
-                    }
-                }
-            } catch (e: IOException) {
-                val current = synchronized(connectionLock) { connectionToken == token && socket === s }
-                if (current) {
-                    closeSpecificConnection(s, token)
-                    state("DESCONECTADO", e.message ?: "Conexión finalizada")
-                }
+            var offset = 0
+            while (offset < payload.size) {
+                val end = minOf(offset + 180, payload.size)
+                characteristic.value = payload.copyOfRange(offset, end)
+                if (!gatt.writeCharacteristic(characteristic)) { state("DESCONECTADO", "BLE: no se pudo iniciar el envío"); return@execute }
+                offset = end
+                try { Thread.sleep(50) } catch (_: InterruptedException) { return@execute }
             }
         }
     }
@@ -407,45 +418,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun send(message: String) {
-        if (message.length > 900 * 1024) {
-            state("ERROR", "Mensaje Bluetooth demasiado grande")
-            return
-        }
-        writerExecutor.execute {
-            var sentOutput: OutputStream? = null
-            try {
-                synchronized(connectionLock) {
-                    val out = output ?: run {
-                        state("DESCONECTADO", "No hay teléfono conectado")
-                        return@synchronized
-                    }
-                    sentOutput = out
-                    out.write((message.replace("\r", "").replace("\n", "") + "\n").toByteArray(Charsets.UTF_8))
-                    out.flush()
-                }
-            } catch (e: IOException) {
-                synchronized(connectionLock) {
-                    if (output === sentOutput) {
-                        try { output?.close() } catch (_: Exception) {}
-                        try { socket?.close() } catch (_: Exception) {}
-                        output = null
-                        socket = null
-                        connectionToken += 1
-                    }
-                }
-                state("DESCONECTADO", e.message ?: "No se pudo enviar")
-            }
-        }
+        if (message.length > 900 * 1024) { state("ERROR", "Mensaje Bluetooth demasiado grande"); return }
+        sendBle(message)
     }
 
     private fun closeConnection() {
+        synchronized(bleLock) {
+            try { bleGatt?.close() } catch (_: Exception) {}
+            bleGatt = null; bleCharacteristic = null; bleIncoming.setLength(0)
+            try { gattServer?.close() } catch (_: Exception) {}
+            gattServer = null
+        }
         synchronized(connectionLock) {
             connectionToken += 1
-            try { output?.close() } catch (_: Exception) {}
-            try { socket?.close() } catch (_: Exception) {}
+            output = null; socket = null
             try { server?.close() } catch (_: Exception) {}
-            output = null
-            socket = null
             server = null
         }
     }
