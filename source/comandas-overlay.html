@@ -94,7 +94,7 @@ function saveProductMeta(m){try{localStorage.setItem(PRODUCT_META_KEY,JSON.strin
 function normalizeProduct(x,meta,now){
   var id=String(x&&x.id||'');if(!id)return null;
   var sig=productSignature(x),given=Number(x&&x.updatedAt)||0,old=meta[id]||{},version=given||Number(old.updatedAt)||0;
-  if(!given&&old.signature!==sig)version=now;
+  if((!given||old.signature!==sig&&given<=Number(old.updatedAt||0)))version=now;
   if(!version)version=now;
   meta[id]={signature:sig,updatedAt:version};
   return{id:id,name:String(x&&x.name||''),price:Number(x&&x.price)||0,cost:Number(x&&x.cost||x&&x.costo||x&&x.purchasePrice)||0,active:x&&x.active!==false,updatedAt:version};
@@ -104,7 +104,7 @@ function mergeProductList(incoming){
   (incoming||[]).forEach(function(x){
     var id=String(x&&x.id||''),l=pm.get(id),rv=Number(x&&x.updatedAt)||0,lv=Number(l&&l.updatedAt)||0;
     if(!id)return;
-    if(!l||rv>lv||(rv===lv&&productSignature(x)!==productSignature(l))){pm.set(id,x);changed=true}
+    if(!l||rv>lv||(rv===lv&&productSignature(x)!==productSignature(l)&&productSignature(x)>productSignature(l))){pm.set(id,x);changed=true}
   });
   var merged=Array.from(pm.values());
   if(JSON.stringify(merged)!==JSON.stringify(db.products)){db.products=merged;changed=true}
