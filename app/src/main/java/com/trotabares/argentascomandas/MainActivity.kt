@@ -247,7 +247,22 @@ class MainActivity : AppCompatActivity() {
                 timeout = timeoutExecutor.schedule({
                     try { socketRef.close() } catch (_: Exception) {}
                 }, 12, TimeUnit.SECONDS)
-                socketRef.connect()
+                try {
+                    socketRef.connect()
+                } catch (first: IOException) {
+                    try { socketRef.close() } catch (_: Exception) {}
+                    s = device.createInsecureRfcommSocketToServiceRecord(uuid)
+                    val fallback = s!!
+                    try {
+                        fallback.connect()
+                    } catch (second: IOException) {
+                        try { fallback.close() } catch (_: Exception) {}
+                        throw IOException("RFCOMM no pudo establecerse (seguro: " + first.message + "; alternativo: " + second.message + ")")
+                    }
+                    timeout?.cancel(false)
+                    establish(fallback, "saliente")
+                    return@execute
+                }
                 timeout?.cancel(false)
                 establish(socketRef, "saliente")
             } catch (e: IOException) {
