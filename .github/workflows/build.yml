@@ -9,6 +9,9 @@ on:
       - "feature/bluetooth-base"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -52,6 +55,8 @@ jobs:
           grep -q "existing.lines||\[\]" app/src/main/assets/index.html
           grep -q "existing.status==='entregada'" app/src/main/assets/index.html
           grep -q "existing.status==='cancelada'" app/src/main/assets/index.html
+          grep -q "argentas_vender_sale_pending" app/src/main/assets/index.html
+          grep -q "function importNewVenderSales" app/src/main/assets/index.html
           ! grep -q "existing.status==='preparando'" app/src/main/assets/index.html
 
       - name: Validate embedded JavaScript
@@ -81,3 +86,15 @@ jobs:
         with:
           name: Argentas-Comandas-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Publicar APK persistente
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          if gh release view latest >/dev/null 2>&1; then
+            gh release upload latest "$APK" --clobber
+            gh release edit latest --title "Argentas-Comandas — última versión" --notes "Build ${{ github.run_number }} · Commit ${{ github.sha }}"
+          else
+            gh release create latest "$APK" --title "Argentas-Comandas — última versión" --notes "Build ${{ github.run_number }} · Commit ${{ github.sha }}" --target "${GITHUB_SHA}"
+          fi
