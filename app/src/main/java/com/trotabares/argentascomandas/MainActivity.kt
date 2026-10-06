@@ -222,6 +222,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var serviceDiscoveryAttempt = 0
     private val gattDiscoveryExecutor = Executors.newSingleThreadScheduledExecutor()
     private val bleIncoming = StringBuilder()
+    @Volatile private var bleReceivedAny = false
     @Volatile private var pendingWriteLatch: CountDownLatch? = null
     @Volatile private var pendingWriteStatus = -1
     @Volatile private var pendingWriteGatt: android.bluetooth.BluetoothGatt? = null
@@ -358,6 +359,8 @@ class MainActivity : AppCompatActivity() {
                     if (responseNeeded) gattServer?.sendResponse(device, requestId, android.bluetooth.BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, offset, null)
                     return
                 }
+                bleReceivedAny = true
+                state("CONECTADO", "Canal BLE recibiendo datos")
                 receiveBleChunk(value)
                 if (responseNeeded) gattServer?.sendResponse(device, requestId, android.bluetooth.BluetoothGatt.GATT_SUCCESS, offset, ByteArray(0))
             }
@@ -413,13 +416,32 @@ class MainActivity : AppCompatActivity() {
             var offset = 0
             while (offset < payload.size) {
                 val end = minOf(offset + 20, payload.size)
-                characteristic.value = payload.copyOfRange(offset, end)
-                if (!server.notifyCharacteristicChanged(device, characteristic, false)) {
-                    state("DESCONECTADO", "BLE: no se pudo notificar al otro Argentas")
+                val chunk = payload.copyOfRange(offset, end)
+                var sent = false
+                repeat(5) {
+                    val result = try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            server.notifyCharacteristicChanged(device, characteristic, false, chunk)
+                        } else {
+                            characteristic.value = chunk
+                            @Suppress("DEPRECATION")
+                            if (server.notifyCharacteristicChanged(device, characteristic, false)) 0 else -1
+                        }
+                    } catch (_: Exception) {
+                        -1
+                    }
+                    if (result == 0) {
+                        sent = true
+                        return@repeat
+                    }
+                    try { Thread.sleep(120) } catch (_: InterruptedException) { return@execute }
+                }
+                if (!sent) {
+                    state("DESCONECTADO", "BLE: Android rechazó el envío de un bloque al otro Argentas")
                     return@execute
                 }
                 offset = end
-                try { Thread.sleep(55) } catch (_: InterruptedException) { return@execute }
+                try { Thread.sleep(35) } catch (_: InterruptedException) { return@execute }
             }
         }
     }
@@ -565,7 +587,7 @@ class MainActivity : AppCompatActivity() {
     private fun closeConnection() {
         synchronized(bleLock) {
             try { bleGatt?.close() } catch (_: Exception) {}
-            bleGatt = null; bleCharacteristic = null; bleIncoming.setLength(0)
+            bleGatt = null; bleCharacteristic = null; bleIncoming.setLength(0); bleReceivedAny = false
             try { gattServer?.close() } catch (_: Exception) {}
             gattServer = null
             gattServiceReady = false
