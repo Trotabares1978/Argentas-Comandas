@@ -8,6 +8,15 @@ import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
 import android.content.pm.PackageManager
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
+import android.net.wifi.p2p.*
+import java.net.ServerSocket
+import java.net.Socket
+import java.net.InetAddress
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import android.os.Build
 import android.os.Bundle
 import android.webkit.JavascriptInterface
@@ -65,7 +74,14 @@ class MainActivity : AppCompatActivity() {
     private val discovered = linkedMapOf<String, String>()
     private val argentasCandidates = linkedMapOf<String, BluetoothDevice>()
     private val bleServiceUuid = ParcelUuid(uuid)
-    private val nearbyServiceId = "com.trotabares.argentascomandas"
+    private val wifiPort = 8988
+    private var p2p: WifiP2pManager? = null
+    private var p2pChannel: WifiP2pManager.Channel? = null
+    private var p2pReceiver: BroadcastReceiver? = null
+    private val p2pDevices = linkedMapOf<String,String>()
+    @Volatile private var p2pSocket: Socket? = null
+    @Volatile private var p2pServer: ServerSocket? = null
+    @Volatile private var p2pConnected = false
     private val nearbyStrategy = Strategy.P2P_POINT_TO_POINT
     private val nearbyClient by lazy { Nearby.getConnectionsClient(this) }
     @Volatile private var nearbyEndpointId: String? = null
@@ -157,6 +173,7 @@ class MainActivity : AppCompatActivity() {
         webView.addJavascriptInterface(NativeBluetoothBridge(), "ArgentasNativeBluetooth")
         setContentView(webView)
         ensurePermissions()
+        setupP2P()
         webView.loadUrl("file:///android_asset/index.html")
     }
 
@@ -199,7 +216,7 @@ class MainActivity : AppCompatActivity() {
             state("APAGADO", "Activá Bluetooth")
             return
         }
-        startNearbyAdvertising()
+        startP2PService()
     }
 
     private fun startPresenceAdvertising() {
@@ -281,69 +298,174 @@ class MainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun startNearbyAdvertising() {
-        if (Build.VERSION.SDK_INT >= 32 &&
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
-            state("ERROR", "Falta permiso Dispositivos cercanos")
-            return
+    private fun setupP2P() {
+        p2p = getSystemService(WIFI_P2P_SERVICE) as? WifiP2pManager ?: return
+        p2pChannel = p2p!!.initialize(this, mainLooper, object : WifiP2pManager.ChannelListener {
+            override fun onChannelDisconnected() { state("ERROR","Wi-Fi Direct perdió el canal") }
+        })
+        p2pReceiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, i: Intent?) {
+                when (i?.action) {
+                    WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
+                        val info = i.getParcelableExtra<WifiP2pInfo>(WifiP2pManager.EXTRA_WIFI_P2P_INFO)
+                        if (info?.groupFormed == true) handleP2PConnection(info)
+                        else if (p2pConnected) { closeP2P(); state("DESCONECTADO","Wi-Fi Direct finalizado") }
+                    }
+                    WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION ->
+                        if (i.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE,-1) != WifiP2pManager.WIFI_P2P_STATE_ENABLED)
+                            state("ERROR","Activá Wi-Fi")
+                }
+            }
         }
-        if (nearbyAdvertising) return
-        nearbyClient.startAdvertising(
-            localDeviceName(),
-            nearbyServiceId,
-            nearbyConnectionCallback,
-            com.google.android.gms.nearby.connection.AdvertisingOptions.Builder()
-                .setStrategy(nearbyStrategy)
-                .build()
-        ).addOnSuccessListener {
-            nearbyAdvertising = true
-            state("LISTO", "Argentas está visible para otros Argentas")
-        }.addOnFailureListener { e ->
-            state("ERROR", "Nearby no pudo publicar Argentas (${e.message ?: "error"})")
-        }
+        registerReceiver(p2pReceiver, IntentFilter().apply {
+            addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
+            addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
+        })
+        startP2PService()
     }
 
     @SuppressLint("MissingPermission")
-    private fun publishNearbyDevices() {
-        val arr = JSONArray()
-        nearbyEndpoints.toSortedMap().forEach { (id, name) ->
-            arr.put(JSONObject().put("name", name).put("address", id))
-        }
-        js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'devices',payload:{devices:"+arr.toString()+"}}}));")
+    private fun startP2PService() {
+        val m=p2p ?: return
+        val ch=p2pChannel ?: return
+        val service=WifiP2pDnsSdServiceInfo.newInstance("Argentas-Comandas","_argentas._tcp",mapOf("app" to "Argentas-Comandas"))
+        m.clearLocalServices(ch,null)
+        m.addLocalService(ch,service,object:WifiP2pManager.ActionListener{
+            override fun onSuccess(){state("LISTO","Argentas visible por Wi-Fi Direct")}
+            override fun onFailure(r:Int){state("ERROR","No se pudo publicar Argentas por Wi-Fi Direct ($r)")}
+        })
     }
 
     @SuppressLint("MissingPermission")
-    private fun startNearbyDiscovery() {
-        nearbyEndpoints.clear()
-        publishNearbyDevices()
-        nearbyDiscoveryRunning = true
-        state("BUSCANDO", "Buscando únicamente Argentas abiertos…")
-        try { nearbyClient.stopDiscovery() } catch (_: Exception) {}
-        nearbyClient.startDiscovery(
-            nearbyServiceId,
-            nearbyDiscoveryCallback,
-            DiscoveryOptions.Builder().setStrategy(nearbyStrategy).build()
-        ).addOnFailureListener { e ->
-            nearbyDiscoveryRunning = false
-            state("ERROR", "Nearby no pudo buscar Argentas (${e.message ?: "error"})")
-        }
+    private fun startP2PDiscovery() {
+        val m=p2p ?: return
+        val ch=p2pChannel ?: return
+        p2pDevices.clear()
+        publishP2PDevices()
+        state("BUSCANDO","Buscando únicamente Argentas abiertos…")
+        m.setDnsSdResponseListeners(ch,
+            {name,type,device->
+                if(name=="Argentas-Comandas" && type=="_argentas._tcp"){
+                    p2pDevices[device.deviceAddress]=device.deviceName.ifBlank{"Argentas"}
+                    publishP2PDevices()
+                }
+            },
+            {_,_,_,_->}
+        )
+        val req=WifiP2pDnsSdServiceRequest.newInstance("_argentas._tcp")
+        m.clearServiceRequests(ch,null)
+        m.addServiceRequest(ch,req,object:WifiP2pManager.ActionListener{
+            override fun onSuccess(){
+                m.discoverServices(ch,object:WifiP2pManager.ActionListener{
+                    override fun onSuccess(){}
+                    override fun onFailure(r:Int){state("ERROR","Wi-Fi Direct no pudo buscar Argentas ($r)")}
+                })
+            }
+            override fun onFailure(r:Int){state("ERROR","Wi-Fi Direct no pudo preparar la búsqueda ($r)")}
+        })
         executor.execute {
-            try { Thread.sleep(8000) } catch (_: InterruptedException) { return@execute }
-            if (nearbyDiscoveryRunning) {
-                nearbyDiscoveryRunning = false
-                try { nearbyClient.stopDiscovery() } catch (_: Exception) {}
-                state("LISTO", if (nearbyEndpoints.isEmpty()) "No hay otros Argentas abiertos en este momento." else "Búsqueda finalizada")
+            try{Thread.sleep(10000)}catch(_:Exception){}
+            try{m.clearServiceRequests(ch,null)}catch(_:Exception){}
+            state("LISTO",if(p2pDevices.isEmpty())"No hay otros Argentas abiertos en este momento." else "Búsqueda finalizada")
+        }
+    }
+
+    private fun publishP2PDevices(){
+        val a=JSONArray()
+        p2pDevices.toSortedMap().forEach{(id,n)->a.put(JSONObject().put("name",n).put("address",id))}
+        js("window.dispatchEvent(new CustomEvent(" + JSONObject.quote("argentas-bluetooth") + ",{detail:{type:" + JSONObject.quote("devices") + ",payload:{devices:" + a.toString() + "}}}));")
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun connectP2P(address:String){
+        val m=p2p ?: return
+        val ch=p2pChannel ?: return
+        m.clearServiceRequests(ch,null)
+        state("CONECTANDO","Conectando directamente por Wi-Fi Direct…")
+        m.connect(ch,WifiP2pConfig().apply{deviceAddress=address},object:WifiP2pManager.ActionListener{
+            override fun onSuccess(){}
+            override fun onFailure(r:Int){state("DESCONECTADO","Wi-Fi Direct no pudo conectar ($r)")}
+        })
+    }
+
+    private fun handleP2PConnection(info:WifiP2pInfo){
+        if(info.isGroupOwner) startP2PServer()
+        else info.groupOwnerAddress?.let{connectP2PSocket(it)}
+    }
+
+    private fun startP2PServer(){
+        executor.execute{
+            try{
+                p2pServer=ServerSocket(wifiPort)
+                val s=p2pServer!!.accept()
+                p2pServer?.close()
+                p2pServer=null
+                attachP2PSocket(s)
+            }catch(_:Exception){state("DESCONECTADO","Wi-Fi Direct: canal servidor falló")}
+        }
+    }
+
+    private fun connectP2PSocket(ip:InetAddress){
+        executor.execute{
+            try{
+                val s=Socket()
+                s.connect(java.net.InetSocketAddress(ip,wifiPort),8000)
+                attachP2PSocket(s)
+            }catch(_:Exception){state("DESCONECTADO","Wi-Fi Direct: canal cliente falló")}
+        }
+    }
+
+    private fun attachP2PSocket(s:Socket){
+        p2pSocket=s
+        p2pConnected=true
+        state("CONECTADO","Conectado directamente por Wi-Fi Direct")
+        js("window.dispatchEvent(new CustomEvent(" + JSONObject.quote("argentas-bluetooth") + ",{detail:{type:" + JSONObject.quote("authorized") + "}}));")
+        executor.execute{
+            try{
+                val r=BufferedReader(InputStreamReader(s.getInputStream(),Charsets.UTF_8))
+                while(true){
+                    val line=r.readLine() ?: break
+                    if(line.isNotBlank()) js("window.onBluetoothMessage&&window.onBluetoothMessage("+JSONObject.quote(line)+");")
+                }
+            }catch(_:Exception){}
+            finally{
+                closeP2P()
+                state("DESCONECTADO","Conexión Wi-Fi Direct finalizada")
             }
         }
     }
 
-    private fun devices() {
-        if (Build.VERSION.SDK_INT >= 32 &&
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
+    private fun sendP2P(message:String){
+        val s=p2pSocket
+        if(!p2pConnected||s==null){state("DESCONECTADO","No hay conexión Wi-Fi Direct activa");return}
+        writerExecutor.execute{
+            try{
+                val out=s.getOutputStream()
+                synchronized(out){
+                    out.write((message.replace("\r","").replace("\n","")+"\n").toByteArray(Charsets.UTF_8))
+                    out.flush()
+                }
+            }catch(_:Exception){
+                closeP2P()
+                state("DESCONECTADO","Wi-Fi Direct perdió el canal")
+            }
+        }
+    }
+
+    private fun closeP2P(){
+        p2pConnected=false
+        try{p2pSocket?.close()}catch(_:Exception){}
+        p2pSocket=null
+        try{p2pServer?.close()}catch(_:Exception){}
+        p2pServer=null
+    }
+
+    private fun devices(){
+        if(Build.VERSION.SDK_INT>=33&&ActivityCompat.checkSelfPermission(this,Manifest.permission.NEARBY_WIFI_DEVICES)!=PackageManager.PERMISSION_GRANTED){
             ensurePermissions()
             return
         }
-        startNearbyDiscovery()
+        startP2PDiscovery()
     }
 
     private val bleLock = Any()
@@ -554,16 +676,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun connect(address: String) {
-        if (address.isBlank()) return
-        nearbyDiscoveryRunning = false
-        try { nearbyClient.stopDiscovery() } catch (_: Exception) {}
-        state("CONECTANDO", "Conectando directamente con Argentas…")
-        nearbyClient.requestConnection(localDeviceName(), address, nearbyConnectionCallback)
-            .addOnFailureListener { e ->
-                state("DESCONECTADO", "Nearby: no se pudo solicitar la conexión (${e.message ?: "error"})")
-            }
-    }
+    private fun connect(address: String) = connectP2P(address)
+
 
 
     @SuppressLint("MissingPermission")
@@ -699,7 +813,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun send(message: String) {
         if (message.length > 1024 * 1024) { state("ERROR", "Mensaje de sincronización demasiado grande"); return }
-        sendNearby(message)
+        sendP2P(message)
     }
 
     private fun closeConnection() {
@@ -741,9 +855,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         closeConnection()
-        try { nearbyClient.stopDiscovery() } catch (_: Exception) {}
-        try { nearbyClient.stopAdvertising() } catch (_: Exception) {}
-        try { nearbyClient.stopAllEndpoints() } catch (_: Exception) {}
+        closeP2P()
+        try { p2pChannel?.let { p2p?.clearLocalServices(it,null); p2p?.clearServiceRequests(it,null) } } catch (_: Exception) {}
+        try { p2pReceiver?.let { unregisterReceiver(it) } } catch (_: Exception) {}
         stopPresenceScan()
         try { bleAdvertiser?.stopAdvertising(bleAdvertiseCallback) } catch (_: Exception) {}
         executor.shutdownNow()
