@@ -34,6 +34,7 @@ import android.os.ParcelUuid
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.lang.reflect.Method
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
@@ -217,6 +218,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var gattServiceReady = false
     @Volatile private var gattPeer: BluetoothDevice? = null
     @Volatile private var serviceDiscoveryAttempt = 0
+    private val gattDiscoveryExecutor = Executors.newSingleThreadScheduledExecutor()
     private val bleIncoming = StringBuilder()
     private val CHARACTERISTIC_UUID = UUID.fromString("7f8d7b9a-4a3d-4c0e-9b0d-2b0d6c7e9a12")
     private val DESCRIPTOR_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
@@ -230,7 +232,7 @@ class MainActivity : AppCompatActivity() {
             }
             if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
                 state("CONECTANDO", "BLE conectado; buscando canal Argentas…")
-                serviceDiscoveryAttempt += 1
+                serviceDiscoveryAttempt = 0
                 val started = gatt.discoverServices()
                 if (!started) state("DESCONECTADO", "BLE: Android no pudo iniciar el descubrimiento del canal")
             } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
@@ -247,6 +249,19 @@ class MainActivity : AppCompatActivity() {
             val service = gatt.getService(uuid)
             if (service == null) {
                 val uuids = gatt.services.joinToString(",") { it.uuid.toString() }
+                if (serviceDiscoveryAttempt < 2) {
+                    serviceDiscoveryAttempt += 1
+                    state("CONECTANDO", "BLE conectado; actualizando servicios Argentas…")
+                    try {
+                        val refresh: Method = gatt.javaClass.getMethod("refresh")
+                        refresh.isAccessible = true
+                        refresh.invoke(gatt)
+                    } catch (_: Exception) {}
+                    gattDiscoveryExecutor.schedule({
+                        try { gatt.discoverServices() } catch (_: Exception) {}
+                    }, 700, TimeUnit.MILLISECONDS)
+                    return
+                }
                 state("DESCONECTADO", "BLE conectado, pero Argentas no aparece entre los servicios ($uuids)")
                 return
             }
@@ -312,7 +327,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
-                if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) state("ESPERANDO", "Argentas disponible para conexión BLE…")
+                if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
+                    gattPeer = device
+                    state("CONECTANDO", "El otro Argentas entró al canal BLE…")
+                } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED && gattPeer?.address == device.address) {
+                    gattPeer = null
+                }
             }
             override fun onDescriptorWriteRequest(device: BluetoothDevice, requestId: Int, descriptor: android.bluetooth.BluetoothGattDescriptor, preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
                 if (responseNeeded) gattServer?.sendResponse(device, requestId, android.bluetooth.BluetoothGatt.GATT_SUCCESS, offset, ByteArray(0))
@@ -459,6 +479,7 @@ class MainActivity : AppCompatActivity() {
             gattServer = null
             gattServiceReady = false
             gattPeer = null
+            try { gattDiscoveryExecutor.shutdownNow() } catch (_: Exception) {}
         }
         synchronized(connectionLock) {
             connectionToken += 1
