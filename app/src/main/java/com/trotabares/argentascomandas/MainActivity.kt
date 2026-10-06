@@ -338,6 +338,8 @@ class MainActivity : AppCompatActivity() {
             override fun onDescriptorWriteRequest(device: BluetoothDevice, requestId: Int, descriptor: android.bluetooth.BluetoothGattDescriptor, preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
                 if (descriptor.uuid == DESCRIPTOR_UUID && value.contentEquals(android.bluetooth.BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)) {
                     gattPeer = device
+                    state("CONECTADO", "Conectado con Argentas por BLE")
+                    js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'authorized'}}));")
                 }
                 if (responseNeeded) gattServer?.sendResponse(device, requestId, android.bluetooth.BluetoothGatt.GATT_SUCCESS, offset, ByteArray(0))
             }
@@ -356,7 +358,7 @@ class MainActivity : AppCompatActivity() {
         val service = android.bluetooth.BluetoothGattService(uuid, android.bluetooth.BluetoothGattService.SERVICE_TYPE_PRIMARY)
         val characteristic = android.bluetooth.BluetoothGattCharacteristic(
             CHARACTERISTIC_UUID,
-            android.bluetooth.BluetoothGattCharacteristic.PROPERTY_READ or android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE or android.bluetooth.BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+            android.bluetooth.BluetoothGattCharacteristic.PROPERTY_READ or android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE or android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE or android.bluetooth.BluetoothGattCharacteristic.PROPERTY_NOTIFY,
             android.bluetooth.BluetoothGattCharacteristic.PERMISSION_READ or android.bluetooth.BluetoothGattCharacteristic.PERMISSION_WRITE
         )
         characteristic.addDescriptor(android.bluetooth.BluetoothGattDescriptor(DESCRIPTOR_UUID, android.bluetooth.BluetoothGattDescriptor.PERMISSION_READ or android.bluetooth.BluetoothGattDescriptor.PERMISSION_WRITE))
@@ -439,11 +441,17 @@ class MainActivity : AppCompatActivity() {
                 val chunk = payload.copyOfRange(offset, end)
                 var started = false
                 repeat(8) {
+                    val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    gatt.writeCharacteristic(characteristic, chunk, android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
+                } else {
+                    characteristic.writeType = android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
                     characteristic.value = chunk
-                    if (gatt.writeCharacteristic(characteristic)) {
-                        started = true
-                        return@repeat
-                    }
+                    if (gatt.writeCharacteristic(characteristic)) 0 else -1
+                }
+                if (result == 0) {
+                    started = true
+                    return@repeat
+                }
                     try { Thread.sleep(80) } catch (_: InterruptedException) { return@execute }
                 }
                 if (!started) {
