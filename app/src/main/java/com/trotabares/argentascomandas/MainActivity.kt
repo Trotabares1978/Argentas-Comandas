@@ -56,6 +56,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var p2pConnected = false
     @Volatile private var connectingTcp = false
     @Volatile private var reconnectScheduled = false
+    @Volatile private var autoReconnectPending = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -209,6 +210,15 @@ class MainActivity : AppCompatActivity() {
                 }
 
             publishP2PDevices()
+
+            if (autoReconnectPending && !p2pConnected) {
+                val last = prefs.getString(lastPeerKey, null)
+                val device = peers.deviceList.firstOrNull { it.deviceAddress == last }
+                if (device != null) {
+                    autoReconnectPending = false
+                    connectP2P(device.deviceAddress)
+                }
+            }
         }
     }
 
@@ -314,8 +324,11 @@ class MainActivity : AppCompatActivity() {
             if (!info.groupFormed) {
                 if (p2pConnected) {
                     closeP2P()
-                    state("DESCONECTADO", "Conexión Wi-Fi Direct finalizada. Reintentando automáticamente…")
-                    scheduleReconnect()
+                }
+                if (!isFinishing && prefs.getString(lastPeerKey, null) != null) {
+                    autoReconnectPending = true
+                    state("DESCONECTADO", "Conexión Wi-Fi Direct finalizada. Buscando nuevamente al dispositivo…")
+                    startP2PDiscovery()
                 }
                 return@requestConnectionInfo
             }
@@ -424,24 +437,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun scheduleReconnect(delayMs: Long = 1800L) {
         if (isFinishing || reconnectScheduled || p2pConnected) return
-        val address = prefs.getString(lastPeerKey, null) ?: return
+        if (prefs.getString(lastPeerKey, null).isNullOrBlank()) return
 
         reconnectScheduled = true
+        autoReconnectPending = true
         reconnectHandler.postDelayed({
             reconnectScheduled = false
             if (isFinishing || p2pConnected) return@postDelayed
             requestConnectionInfo()
-            reconnectHandler.postDelayed({
-                if (isFinishing || p2pConnected) return@postDelayed
-                val current = prefs.getString(lastPeerKey, null)
-                if (!current.isNullOrBlank()) {
-                    try {
-                        connectP2P(current)
-                    } catch (_: Exception) {
-                        scheduleReconnect(1800L)
-                    }
-                }
-            }, 1200L)
         }, delayMs)
     }
 
