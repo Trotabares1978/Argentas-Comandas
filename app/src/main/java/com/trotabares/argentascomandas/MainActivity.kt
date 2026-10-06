@@ -498,8 +498,9 @@ class MainActivity : AppCompatActivity() {
                     if (!isFinishing) {
                         state(
                             "DESCONECTADO",
-                            "La conexión directa se cerró"
+                            "La conexión directa se cerró. Reintentando automáticamente…"
                         )
+                        scheduleReconnect()
                     }
                 } else {
                     try {
