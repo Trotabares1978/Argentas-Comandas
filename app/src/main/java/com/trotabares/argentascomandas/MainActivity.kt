@@ -224,7 +224,7 @@ class MainActivity : AppCompatActivity() {
         override fun onConnectionStateChange(gatt: android.bluetooth.BluetoothGatt, status: Int, newState: Int) {
             if (status != android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
                 try { gatt.close() } catch (_: Exception) {}
-                state("DESCONECTADO", "BLE: error de conexión ($status)")
+                state("DESCONECTADO", if (status == 8) "BLE: tiempo de conexión agotado (8). El otro Argentas fue encontrado, pero Android perdió el enlace; reintentá." else "BLE: error de conexión ($status)")
                 return
             }
             if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
@@ -338,15 +338,24 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("MissingPermission")
     private fun connect(address: String) {
         if (!canConnect()) { ensurePermissions(); return }
-        val device = try { adapter?.getRemoteDevice(address) } catch (_: Exception) { null }
+        val device = argentasCandidates[address] ?: try { adapter?.getRemoteDevice(address) } catch (_: Exception) { null }
         if (device == null) { state("DESCONECTADO", "No se encontró el dispositivo Argentas"); return }
+        stopPresenceScan()
         synchronized(bleLock) {
+            try { bleGatt?.disconnect() } catch (_: Exception) {}
             try { bleGatt?.close() } catch (_: Exception) {}
             bleGatt = null; bleCharacteristic = null; bleIncoming.setLength(0)
         }
         state("CONECTANDO", "Conectando directamente con Argentas…")
-        bleGatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) device.connectGatt(this, false, bleGattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE)
-        else device.connectGatt(this, false, bleGattCallback)
+        executor.execute {
+            try { Thread.sleep(250) } catch (_: InterruptedException) { return@execute }
+            val gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                device.connectGatt(this@MainActivity, false, bleGattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE)
+            } else {
+                device.connectGatt(this@MainActivity, false, bleGattCallback)
+            }
+            synchronized(bleLock) { bleGatt = gatt }
+        }
     }
 
     private fun receiveBleChunk(bytes: ByteArray) {
