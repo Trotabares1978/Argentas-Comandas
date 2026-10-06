@@ -126,6 +126,8 @@
     return changed;
   }
 
+  function checksum(text){var h=2166136261;for(var i=0;i<text.length;i++){h^=text.charCodeAt(i);h+=(h<<1)+(h<<4)+(h<<7)+(h<<8)+(h<<24);h=h>>>0}return ('00000000'+h.toString(16)).slice(-8)}
+
   function collect(){
     var data={};
     for(var i=0;i<localStorage.length;i++){
@@ -137,7 +139,8 @@
         catch(e){data[k]=localStorage.getItem(k);}
       }
     }
-    return {format:'argentas-comandas-backup',version:BACKUP_VERSION,createdAt:new Date().toISOString(),data:data};
+    var raw=JSON.stringify(data);
+    return {format:'argentas-comandas-backup',version:BACKUP_VERSION,createdAt:new Date().toISOString(),checksum:checksum(raw),keys:Object.keys(data).length,data:data};
   }
 
   var AUTO_BACKUP_KEY='argentas_auto_backup';
@@ -183,8 +186,15 @@
         if(!payload||payload.format!=='argentas-comandas-backup'||!payload.data||typeof payload.data!=='object')throw new Error('Formato de respaldo no reconocido');
         var keys=Object.keys(payload.data);
         if(!keys.length)throw new Error('El respaldo está vacío');
+        if(payload.checksum&&payload.checksum!==checksum(JSON.stringify(payload.data)))throw new Error('El respaldo está corrupto o fue modificado');
+        var rollback=collect().data;
         if(!window.confirm('Se van a restaurar '+keys.length+' datos de Argentas-Comandas. La aplicación se reiniciará. ¿Continuar?'))return;
-        keys.forEach(function(k){var v=payload.data[k];localStorage.setItem(k,typeof v==='string'?v:JSON.stringify(v))});
+        try{
+          keys.forEach(function(k){if(k.indexOf('argentas_')!==0)throw new Error('Clave no permitida: '+k);var v=payload.data[k];localStorage.setItem(k,typeof v==='string'?v:JSON.stringify(v))});
+        }catch(writeError){
+          try{Object.keys(rollback).forEach(function(k){localStorage.setItem(k,typeof rollback[k]==='string'?rollback[k]:JSON.stringify(rollback[k]))})}catch(rollbackError){}
+          throw writeError;
+        }
         alert('Respaldo restaurado correctamente. Argentas-Comandas se reiniciará.');
         location.reload();
       }catch(e){alert('No se pudo restaurar el respaldo: '+(e&&e.message?e.message:'archivo inválido'))}
