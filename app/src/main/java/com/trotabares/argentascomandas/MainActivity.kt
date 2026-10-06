@@ -552,29 +552,16 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun connect(address: String) {
-        if (!canConnect()) { ensurePermissions(); return }
-        connectedAddress = address
-        reconnectAttempts = 0
-        reconnectScheduled = false
-        val device = argentasCandidates[address] ?: try { adapter?.getRemoteDevice(address) } catch (_: Exception) { null }
-        if (device == null) { state("DESCONECTADO", "No se encontró el dispositivo Argentas"); return }
-        stopPresenceScan()
-        synchronized(bleLock) {
-            try { bleGatt?.disconnect() } catch (_: Exception) {}
-            try { bleGatt?.close() } catch (_: Exception) {}
-            bleGatt = null; bleCharacteristic = null; serverCharacteristic = null; bleIncoming.setLength(0)
-        }
+        if (address.isBlank()) return
+        nearbyDiscoveryRunning = false
+        try { nearbyClient.stopDiscovery() } catch (_: Exception) {}
         state("CONECTANDO", "Conectando directamente con Argentas…")
-        executor.execute {
-            try { Thread.sleep(250) } catch (_: InterruptedException) { return@execute }
-            val gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                device.connectGatt(this@MainActivity, false, bleGattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE)
-            } else {
-                device.connectGatt(this@MainActivity, false, bleGattCallback)
+        nearbyClient.requestConnection(localDeviceName(), address, nearbyConnectionCallback)
+            .addOnFailureListener { e ->
+                state("DESCONECTADO", "Nearby: no se pudo solicitar la conexión (${e.message ?: "error"})")
             }
-            synchronized(bleLock) { bleGatt = gatt }
-        }
     }
+
 
     @SuppressLint("MissingPermission")
     private fun sendBleFromServer(message: String) {
@@ -631,74 +618,33 @@ class MainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun sendBle(message: String) {
-        val gatt = synchronized(bleLock) { bleGatt }
-        val characteristic = synchronized(bleLock) { bleCharacteristic }
-        if (gatt == null || characteristic == null) {
-            state("DESCONECTADO", "No hay conexión BLE activa")
+    private fun sendNearby(message: String) {
+        val endpoint = nearbyEndpointId
+        if (endpoint == null) {
+            state("DESCONECTADO", "No hay conexión Nearby activa")
             return
         }
-        val payload = (message.replace("\r", "").replace("\n", "") + "\n").toByteArray(Charsets.UTF_8)
-
-        writerExecutor.execute {
-            var offset = 0
-            while (offset < payload.size) {
-                val end = minOf(offset + 20, payload.size)
-                val chunk = payload.copyOfRange(offset, end)
-                var delivered = false
-
-                repeat(3) {
-                    val latch = CountDownLatch(1)
-                    pendingWriteStatus = -1
-                    pendingWriteGatt = gatt
-                    pendingWriteLatch = latch
-
-                    val started = try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            gatt.writeCharacteristic(
-                                characteristic,
-                                chunk,
-                                android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-                            ) == 0
-                        } else {
-                            @Suppress("DEPRECATION")
-                            characteristic.writeType = android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-                            @Suppress("DEPRECATION")
-                            characteristic.value = chunk
-                            @Suppress("DEPRECATION")
-                            gatt.writeCharacteristic(characteristic)
-                        }
-                    } catch (_: Exception) {
-                        false
-                    }
-
-                    if (started) {
-                        try { latch.await(3, TimeUnit.SECONDS) } catch (_: InterruptedException) {
-                            pendingWriteLatch = null
-                            pendingWriteGatt = null
-                            return@execute
-                        }
-                        if (pendingWriteStatus == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
-                            delivered = true
-                            pendingWriteLatch = null
-                            pendingWriteGatt = null
-                            return@repeat
-                        }
-                    }
-
-                    pendingWriteLatch = null
-                    pendingWriteGatt = null
-                    try { Thread.sleep(120) } catch (_: InterruptedException) { return@execute }
-                }
-
-                if (!delivered) {
-                    state("DESCONECTADO", "BLE: el canal no confirmó un bloque; envío detenido para no perder datos")
-                    return@execute
-                }
-                offset = end
+        val bytes = message.toByteArray(Charsets.UTF_8)
+        if (bytes.size > 1024 * 1024) {
+            state("ERROR", "Mensaje de sincronización demasiado grande")
+            return
+        }
+        nearbyClient.sendPayload(endpoint, Payload.fromBytes(bytes))
+            .addOnFailureListener { e ->
+                state("DESCONECTADO", "Nearby no pudo enviar la sincronización (${e.message ?: "error"})")
             }
+    }
+
+    private fun receiveNearbyPayload(bytes: ByteArray) {
+        try {
+            val message = String(bytes, Charsets.UTF_8)
+            js("window.onBluetoothMessage&&window.onBluetoothMessage(" + JSONObject.quote(message) + ");")
+            state("CONECTADO", "Datos recibidos de Argentas")
+        } catch (_: Exception) {
+            state("ERROR", "Nearby recibió datos inválidos")
         }
     }
+
 
     private fun localDeviceName(): String {
         if (!canConnect()) return "Argentas"
@@ -749,9 +695,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun send(message: String) {
-        if (message.length > 900 * 1024) { state("ERROR", "Mensaje Bluetooth demasiado grande"); return }
-        val clientConnected = synchronized(bleLock) { bleGatt != null && bleCharacteristic != null }
-        if (clientConnected) sendBle(message) else sendBleFromServer(message)
+        if (message.length > 1024 * 1024) { state("ERROR", "Mensaje de sincronización demasiado grande"); return }
+        sendNearby(message)
     }
 
     private fun closeConnection() {
@@ -792,6 +737,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         closeConnection()
+        try { nearbyClient.stopDiscovery() } catch (_: Exception) {}
+        try { nearbyClient.stopAdvertising() } catch (_: Exception) {}
+        try { nearbyClient.stopAllEndpoints() } catch (_: Exception) {}
         stopPresenceScan()
         try { bleAdvertiser?.stopAdvertising(bleAdvertiseCallback) } catch (_: Exception) {}
         executor.shutdownNow()
