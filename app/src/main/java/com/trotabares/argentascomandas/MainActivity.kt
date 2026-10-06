@@ -31,6 +31,18 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.os.ParcelUuid
+import com.google.android.gms.nearby.Nearby
+import com.google.android.gms.nearby.connection.ConnectionInfo
+import com.google.android.gms.nearby.connection.ConnectionLifecycleCallback
+import com.google.android.gms.nearby.connection.ConnectionResolution
+import com.google.android.gms.nearby.connection.ConnectionsStatusCodes
+import com.google.android.gms.nearby.connection.DiscoveredEndpointInfo
+import com.google.android.gms.nearby.connection.DiscoveryOptions
+import com.google.android.gms.nearby.connection.EndpointDiscoveryCallback
+import com.google.android.gms.nearby.connection.Payload
+import com.google.android.gms.nearby.connection.PayloadCallback
+import com.google.android.gms.nearby.connection.PayloadTransferUpdate
+import com.google.android.gms.nearby.connection.Strategy
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.CountDownLatch
@@ -53,10 +65,64 @@ class MainActivity : AppCompatActivity() {
     private val discovered = linkedMapOf<String, String>()
     private val argentasCandidates = linkedMapOf<String, BluetoothDevice>()
     private val bleServiceUuid = ParcelUuid(uuid)
+    private val nearbyServiceId = "com.trotabares.argentascomandas"
+    private val nearbyStrategy = Strategy.P2P_POINT_TO_POINT
+    private val nearbyClient by lazy { Nearby.getConnectionsClient(this) }
+    @Volatile private var nearbyEndpointId: String? = null
+    private val nearbyEndpoints = linkedMapOf<String, String>()
+    @Volatile private var nearbyDiscoveryRunning = false
+    @Volatile private var nearbyAdvertising = false
     @Volatile private var pendingIncomingSocket: BluetoothSocket? = null
     @Volatile private var pendingIncomingToken = 0L
     private var bleAdvertiser: BluetoothLeAdvertiser? = null
     private var bleScanner: BluetoothLeScanner? = null
+    private val nearbyPayloadCallback = object : PayloadCallback() {
+        override fun onPayloadReceived(endpointId: String, payload: Payload) {
+            if (payload.type == Payload.Type.BYTES) {
+                val bytes = payload.asBytes()
+                if (bytes != null) receiveNearbyPayload(bytes)
+            }
+        }
+        override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {}
+    }
+
+    private val nearbyConnectionCallback = object : ConnectionLifecycleCallback() {
+        override fun onConnectionInitiated(endpointId: String, connectionInfo: ConnectionInfo) {
+            nearbyClient.acceptConnection(endpointId, nearbyPayloadCallback)
+                .addOnFailureListener { e ->
+                    state("DESCONECTADO", "Nearby: no se pudo aceptar la conexión (${e.message ?: "error"})")
+                }
+        }
+        override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
+            val code = result.status.statusCode
+            if (code == ConnectionsStatusCodes.STATUS_OK) {
+                nearbyEndpointId = endpointId
+                nearbyDiscoveryRunning = false
+                try { nearbyClient.stopDiscovery() } catch (_: Exception) {}
+                state("CONECTADO", "Conectado con Argentas por Nearby")
+                js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'authorized'}}));")
+            } else {
+                nearbyEndpointId = null
+                state("DESCONECTADO", "Nearby: conexión falló ($code)")
+            }
+        }
+        override fun onDisconnected(endpointId: String) {
+            if (nearbyEndpointId == endpointId) nearbyEndpointId = null
+            state("DESCONECTADO", "Conexión con Argentas finalizada")
+        }
+    }
+
+    private val nearbyDiscoveryCallback = object : EndpointDiscoveryCallback() {
+        override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
+            nearbyEndpoints[endpointId] = info.endpointName.ifBlank { "Argentas" }
+            publishNearbyDevices()
+        }
+        override fun onEndpointLost(endpointId: String) {
+            nearbyEndpoints.remove(endpointId)
+            publishNearbyDevices()
+        }
+    }
+
     private val bleAdvertiseCallback = object : AdvertiseCallback() {
         override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
             state("LISTO", "Argentas está visible para otros Argentas")
@@ -111,7 +177,8 @@ class MainActivity : AppCompatActivity() {
             val needed = arrayOf(
                 Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_CONNECT,
-                Manifest.permission.BLUETOOTH_ADVERTISE
+                Manifest.permission.BLUETOOTH_ADVERTISE,
+                Manifest.permission.NEARBY_WIFI_DEVICES
             ).filter {
                 ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
             }
@@ -129,7 +196,7 @@ class MainActivity : AppCompatActivity() {
             state("APAGADO", "Activá Bluetooth")
             return
         }
-        startServer()
+        startNearbyAdvertising()
     }
 
     private fun startPresenceAdvertising() {
@@ -210,11 +277,70 @@ class MainActivity : AppCompatActivity() {
             arr.toString() + "}}}));")
     }
 
+    @SuppressLint("MissingPermission")
+    private fun startNearbyAdvertising() {
+        if (Build.VERSION.SDK_INT >= 32 &&
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
+            state("ERROR", "Falta permiso Dispositivos cercanos")
+            return
+        }
+        if (nearbyAdvertising) return
+        nearbyClient.startAdvertising(
+            localDeviceName(),
+            nearbyServiceId,
+            nearbyConnectionCallback,
+            com.google.android.gms.nearby.connection.AdvertisingOptions.Builder()
+                .setStrategy(nearbyStrategy)
+                .build()
+        ).addOnSuccessListener {
+            nearbyAdvertising = true
+            state("LISTO", "Argentas está visible para otros Argentas")
+        }.addOnFailureListener { e ->
+            state("ERROR", "Nearby no pudo publicar Argentas (${e.message ?: "error"})")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun publishNearbyDevices() {
+        val arr = JSONArray()
+        nearbyEndpoints.toSortedMap().forEach { (id, name) ->
+            arr.put(JSONObject().put("name", name).put("address", id))
+        }
+        js("window.dispatchEvent(new CustomEvent('argentas-bluetooth',{detail:{type:'devices',payload:{devices:"+arr.toString()+"}}}));")
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startNearbyDiscovery() {
+        nearbyEndpoints.clear()
+        publishNearbyDevices()
+        nearbyDiscoveryRunning = true
+        state("BUSCANDO", "Buscando únicamente Argentas abiertos…")
+        try { nearbyClient.stopDiscovery() } catch (_: Exception) {}
+        nearbyClient.startDiscovery(
+            nearbyServiceId,
+            nearbyDiscoveryCallback,
+            DiscoveryOptions.Builder().setStrategy(nearbyStrategy).build()
+        ).addOnFailureListener { e ->
+            nearbyDiscoveryRunning = false
+            state("ERROR", "Nearby no pudo buscar Argentas (${e.message ?: "error"})")
+        }
+        executor.execute {
+            try { Thread.sleep(8000) } catch (_: InterruptedException) { return@execute }
+            if (nearbyDiscoveryRunning) {
+                nearbyDiscoveryRunning = false
+                try { nearbyClient.stopDiscovery() } catch (_: Exception) {}
+                state("LISTO", if (nearbyEndpoints.isEmpty()) "No hay otros Argentas abiertos en este momento." else "Búsqueda finalizada")
+            }
+        }
+    }
+
     private fun devices() {
-        if (!canScan() || !canConnect()) { ensurePermissions(); return }
-        val a = adapter ?: run { state("NO_DISPONIBLE"); return }
-        if (!a.isEnabled) { state("APAGADO", "Activá Bluetooth"); return }
-        startPresenceScan()
+        if (Build.VERSION.SDK_INT >= 32 &&
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
+            ensurePermissions()
+            return
+        }
+        startNearbyDiscovery()
     }
 
     private val bleLock = Any()
