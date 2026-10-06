@@ -2,6 +2,10 @@ name: Build Argentas-Comandas
 # build trigger
 # manual build trigger
 
+concurrency:
+  group: argentas-comandas-build
+  cancel-in-progress: true
+
 on:
   push:
     branches:
