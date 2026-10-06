@@ -142,7 +142,7 @@ class MainActivity : AppCompatActivity() {
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
-            .setConnectable(false)
+            .setConnectable(true)
             .build()
         val data = AdvertiseData.Builder()
             .addServiceUuid(bleServiceUuid)
