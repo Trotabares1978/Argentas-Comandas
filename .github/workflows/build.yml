@@ -61,7 +61,7 @@ jobs:
           grep -q "existing.status==='cancelada'" app/src/main/assets/index.html
           grep -q "argentas_vender_sale_pending" app/src/main/assets/index.html
           grep -q "function importNewVenderSales" app/src/main/assets/index.html
-          ! grep -q "existing.status==='preparando'" app/src/main/assets/index.html
+          grep -q "existing.status==='preparando'" app/src/main/assets/index.html
 
       - name: Validate embedded JavaScript
         run: |
